@@ -4,6 +4,7 @@ Session and authentication management for Codeforces.
 
 import json
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional
@@ -21,8 +22,23 @@ class Session:
     def __init__(self):
         """Initialize session."""
         self.session_file = get_config_dir() / "session"
+
+        # More complete browser headers to avoid being blocked
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+        }
+
         self.client = httpx.Client(
-            headers={"User-Agent": USER_AGENT},
+            headers=headers,
             timeout=REQUEST_TIMEOUT,
             follow_redirects=True,
         )
@@ -130,7 +146,13 @@ class Session:
             AuthenticationError: If login fails
         """
         try:
-            # First, get the login page to get CSRF token
+            # First, visit the home page to get initial cookies
+            self.client.get(BASE_URL)
+
+            # Small delay to mimic human behavior
+            time.sleep(0.5)
+
+            # Then get the login page to get CSRF token
             response = self.client.get(LOGIN_URL)
             response.raise_for_status()
 
@@ -141,6 +163,9 @@ class Session:
 
             self.csrf_token = csrf_token
 
+            # Small delay before submitting
+            time.sleep(0.5)
+
             # Prepare login data
             login_data = {
                 "csrf_token": csrf_token,
@@ -150,8 +175,15 @@ class Session:
                 "remember": "on",
             }
 
+            # Important: Add Referer header for the POST request
+            post_headers = {
+                "Referer": LOGIN_URL,
+                "Origin": BASE_URL,
+                "Content-Type": "application/x-www-form-urlencoded",
+            }
+
             # Submit login
-            response = self.client.post(LOGIN_URL, data=login_data)
+            response = self.client.post(LOGIN_URL, data=login_data, headers=post_headers)
             response.raise_for_status()
 
             # Check if login was successful
