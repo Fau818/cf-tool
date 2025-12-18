@@ -5,7 +5,9 @@ Uses cloudscraper to bypass Cloudflare protection.
 """
 
 import json
+import random
 import re
+import string
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,8 +16,18 @@ from typing import Optional
 import cloudscraper
 from bs4 import BeautifulSoup
 
-from cf.constants import BASE_URL, LOGIN_URL, REQUEST_TIMEOUT, USER_AGENT
+from cf.constants import BASE_URL, LOGIN_URL, REQUEST_TIMEOUT
 from cf.utils import AuthenticationError, get_config_dir
+
+
+def generate_ftaa() -> str:
+    """Generate random ftaa token (18 alphanumeric characters)."""
+    chars = string.ascii_lowercase + string.digits
+    return ''.join(random.choices(chars, k=18))
+
+
+# Fixed bfaa value (browser fingerprint hash)
+BFAA = "f1b3f18c715565b589b7823cda7448ce"
 
 
 class Session:
@@ -118,26 +130,52 @@ class Session:
         """
         Extract CSRF token from HTML.
 
+        Codeforces embeds CSRF token in data-csrf attribute.
+
         Args:
             html: HTML content
 
         Returns:
             CSRF token or None
         """
+        # Method 1: Look for data-csrf attribute (current Codeforces format)
+        # Pattern: data-csrf='...' or data-csrf="..."
+        match = re.search(r'data-csrf=[\'"]([a-f0-9]+)[\'"]', html)
+        if match:
+            return match.group(1)
+
+        # Method 2: Look for csrf_token in hidden input (older format)
+        # Pattern: name="csrf_token" value="..."
+        match = re.search(r'csrf_token[\'"]?\s+value=[\'"]([a-f0-9]+)[\'"]', html)
+        if match:
+            return match.group(1)
+
+        # Method 3: Look for value='...' after csrf_token (another format)
+        # Pattern: name='csrf_token' value='...'
+        match = re.search(r"name=['\"]csrf_token['\"].*?value=['\"]([a-f0-9]+)['\"]", html, re.DOTALL)
+        if match:
+            return match.group(1)
+
+        # Method 4: Using BeautifulSoup as fallback
         soup = BeautifulSoup(html, 'lxml')
 
-        # Look for csrf token in meta tag
+        # Look for any element with data-csrf attribute
+        elem = soup.find(attrs={'data-csrf': True})
+        if elem:
+            return elem.get('data-csrf')
+
+        # Look for meta tag
         csrf_meta = soup.find('meta', {'name': 'X-Csrf-Token'})
         if csrf_meta and csrf_meta.get('content'):
             return csrf_meta['content']
 
-        # Look for csrf token in hidden input
+        # Look for hidden input
         csrf_input = soup.find('input', {'name': 'csrf_token'})
         if csrf_input and csrf_input.get('value'):
             return csrf_input['value']
 
-        # Try to find it in the HTML with regex as fallback
-        match = re.search(r'csrf[\'"]?\s*[:=]\s*[\'"]([a-f0-9]+)[\'"]', html, re.I)
+        # Method 5: Look for csrf in JavaScript (last resort)
+        match = re.search(r"csrf['\"]?\s*[:=]\s*['\"]([a-f0-9]{32})['\"]", html, re.I)
         if match:
             return match.group(1)
 
@@ -169,27 +207,41 @@ class Session:
             csrf_token = self.extract_csrf_token(response.text)
 
             if not csrf_token:
-                raise AuthenticationError("Could not extract CSRF token from login page")
+                # Debug: save the response to see what we got
+                debug_file = get_config_dir() / "debug_login_page.html"
+                with open(debug_file, 'w') as f:
+                    f.write(response.text)
+                raise AuthenticationError(
+                    f"Could not extract CSRF token from login page. "
+                    f"Debug HTML saved to {debug_file}"
+                )
 
             self.csrf_token = csrf_token
 
             # Small delay before submitting
             time.sleep(0.5)
 
-            # Prepare login data
+            # Generate ftaa token
+            ftaa = generate_ftaa()
+
+            # Prepare login data with all required fields
             login_data = {
                 "csrf_token": csrf_token,
                 "action": "enter",
+                "ftaa": ftaa,
+                "bfaa": BFAA,
+                "_tta": "176",
                 "handleOrEmail": username,
                 "password": password,
                 "remember": "on",
             }
 
-            # Important: Add Referer header for the POST request
+            # Important: Add headers including X-Csrf-Token
             post_headers = {
                 "Referer": LOGIN_URL,
                 "Origin": BASE_URL,
                 "Content-Type": "application/x-www-form-urlencoded",
+                "X-Csrf-Token": csrf_token,
             }
 
             # Submit login
@@ -202,9 +254,13 @@ class Session:
             if "/enter" in str(response.url) or "handleOrEmail" in response.text:
                 # Try to extract error message
                 soup = BeautifulSoup(response.text, 'lxml')
+                error_span = soup.find('span', class_='error')
                 error_div = soup.find('div', class_='error')
+
                 error_msg = "Invalid username or password"
-                if error_div:
+                if error_span:
+                    error_msg = error_span.get_text().strip()
+                elif error_div:
                     error_msg = error_div.get_text().strip()
 
                 raise AuthenticationError(error_msg)
