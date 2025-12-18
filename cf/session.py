@@ -1,13 +1,12 @@
 """
 Session and authentication management for Codeforces.
 
-Uses cloudscraper to bypass Cloudflare protection.
+Uses DrissionPage (real browser) for login to bypass Cloudflare Turnstile,
+and cloudscraper for subsequent requests.
 """
 
 import json
-import random
 import re
-import string
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,36 +19,27 @@ from cf.constants import BASE_URL, LOGIN_URL, REQUEST_TIMEOUT
 from cf.utils import AuthenticationError, get_config_dir
 
 
-def generate_ftaa() -> str:
-    """Generate random ftaa token (18 alphanumeric characters)."""
-    chars = string.ascii_lowercase + string.digits
-    return ''.join(random.choices(chars, k=18))
-
-
-# Fixed bfaa value (browser fingerprint hash)
-BFAA = "f1b3f18c715565b589b7823cda7448ce"
-
-
 class Session:
     """Manages Codeforces session and authentication."""
 
     def __init__(self):
-        """Initialize session with cloudscraper to bypass Cloudflare."""
+        """Initialize session."""
         self.session_file = get_config_dir() / "session"
+        self.client = None
+        self.csrf_token = None
+        self._init_client()
 
-        # Create cloudscraper session - this handles Cloudflare challenges
+    def _init_client(self):
+        """Initialize HTTP client with saved cookies if available."""
+        # Create cloudscraper session for HTTP requests
         self.client = cloudscraper.create_scraper(
             browser={
                 'browser': 'chrome',
-                'platform': 'darwin',  # macOS
+                'platform': 'darwin',
                 'desktop': True,
             }
         )
-
-        # Set timeout
         self.client.timeout = REQUEST_TIMEOUT
-
-        # Set additional headers
         self.client.headers.update({
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
@@ -58,7 +48,7 @@ class Session:
             "Upgrade-Insecure-Requests": "1",
         })
 
-        self.csrf_token = None
+        # Load saved session
         self.load_session()
 
     def load_session(self) -> bool:
@@ -82,7 +72,7 @@ class Session:
                 if datetime.now() >= expiry:
                     return False
 
-            # Restore cookies
+            # Restore cookies to HTTP client
             cookies = session_data.get("cookies", {})
             for name, value in cookies.items():
                 self.client.cookies.set(name, value)
@@ -94,23 +84,18 @@ class Session:
         except (json.JSONDecodeError, IOError):
             return False
 
-    def save_session(self, username: str) -> None:
+    def save_session(self, username: str, cookies: dict) -> None:
         """
         Save session to file.
 
         Args:
             username: Codeforces username
+            cookies: Dictionary of cookies
         """
-        # Session expires in 30 days
         expires_at = datetime.now() + timedelta(days=30)
 
-        # Convert cookies to dict
-        cookies_dict = {}
-        for cookie in self.client.cookies:
-            cookies_dict[cookie.name] = cookie.value
-
         session_data = {
-            "cookies": cookies_dict,
+            "cookies": cookies,
             "csrf_token": self.csrf_token,
             "username": username,
             "expires_at": expires_at.isoformat(),
@@ -120,70 +105,40 @@ class Session:
             with open(self.session_file, 'w') as f:
                 json.dump(session_data, f, indent=2)
 
-            # Set restrictive permissions
             self.session_file.chmod(0o600)
 
         except IOError as e:
             print(f"Warning: Failed to save session: {e}")
 
     def extract_csrf_token(self, html: str) -> Optional[str]:
-        """
-        Extract CSRF token from HTML.
-
-        Codeforces embeds CSRF token in data-csrf attribute.
-
-        Args:
-            html: HTML content
-
-        Returns:
-            CSRF token or None
-        """
-        # Method 1: Look for data-csrf attribute (current Codeforces format)
-        # Pattern: data-csrf='...' or data-csrf="..."
+        """Extract CSRF token from HTML."""
+        # Method 1: data-csrf attribute
         match = re.search(r'data-csrf=[\'"]([a-f0-9]+)[\'"]', html)
         if match:
             return match.group(1)
 
-        # Method 2: Look for csrf_token in hidden input (older format)
-        # Pattern: name="csrf_token" value="..."
-        match = re.search(r'csrf_token[\'"]?\s+value=[\'"]([a-f0-9]+)[\'"]', html)
-        if match:
-            return match.group(1)
-
-        # Method 3: Look for value='...' after csrf_token (another format)
-        # Pattern: name='csrf_token' value='...'
+        # Method 2: Hidden input
         match = re.search(r"name=['\"]csrf_token['\"].*?value=['\"]([a-f0-9]+)['\"]", html, re.DOTALL)
         if match:
             return match.group(1)
 
-        # Method 4: Using BeautifulSoup as fallback
+        # Method 3: BeautifulSoup
         soup = BeautifulSoup(html, 'lxml')
-
-        # Look for any element with data-csrf attribute
         elem = soup.find(attrs={'data-csrf': True})
         if elem:
             return elem.get('data-csrf')
 
-        # Look for meta tag
-        csrf_meta = soup.find('meta', {'name': 'X-Csrf-Token'})
-        if csrf_meta and csrf_meta.get('content'):
-            return csrf_meta['content']
-
-        # Look for hidden input
         csrf_input = soup.find('input', {'name': 'csrf_token'})
         if csrf_input and csrf_input.get('value'):
             return csrf_input['value']
-
-        # Method 5: Look for csrf in JavaScript (last resort)
-        match = re.search(r"csrf['\"]?\s*[:=]\s*['\"]([a-f0-9]{32})['\"]", html, re.I)
-        if match:
-            return match.group(1)
 
         return None
 
     def login(self, username: str, password: str) -> None:
         """
-        Login to Codeforces.
+        Login to Codeforces using browser automation.
+
+        Opens a real Chrome browser to handle Cloudflare Turnstile.
 
         Args:
             username: Codeforces username or email
@@ -193,122 +148,140 @@ class Session:
             AuthenticationError: If login fails
         """
         try:
-            # First, visit the home page to get initial cookies and pass Cloudflare
-            response = self.client.get(BASE_URL)
-            response.raise_for_status()
+            from DrissionPage import ChromiumPage, ChromiumOptions
+        except ImportError:
+            raise AuthenticationError(
+                "DrissionPage is required for login. Install it with: pip install DrissionPage"
+            )
 
-            # Small delay to mimic human behavior
-            time.sleep(0.5)
+        print("Opening browser for Codeforces login...")
+        print("(This is needed to bypass Cloudflare protection)")
 
-            # Then get the login page to get CSRF token
-            response = self.client.get(LOGIN_URL)
-            response.raise_for_status()
+        try:
+            # Configure browser options
+            options = ChromiumOptions()
+            options.set_argument('--no-first-run')
+            options.set_argument('--no-default-browser-check')
+            options.set_argument('--disable-infobars')
 
-            csrf_token = self.extract_csrf_token(response.text)
+            # Create browser instance
+            page = ChromiumPage(options)
 
-            if not csrf_token:
-                # Debug: save the response to see what we got
-                debug_file = get_config_dir() / "debug_login_page.html"
-                with open(debug_file, 'w') as f:
-                    f.write(response.text)
-                raise AuthenticationError(
-                    f"Could not extract CSRF token from login page. "
-                    f"Debug HTML saved to {debug_file}"
-                )
+            # Navigate to Codeforces
+            page.get(BASE_URL)
 
-            self.csrf_token = csrf_token
+            # Wait for page to load (handles Cloudflare challenge automatically)
+            time.sleep(2)
 
-            # Small delay before submitting
-            time.sleep(0.5)
+            # Navigate to login page
+            page.get(LOGIN_URL)
 
-            # Generate ftaa token
-            ftaa = generate_ftaa()
+            # Wait for login page to load
+            time.sleep(2)
 
-            # Prepare login data with all required fields
-            login_data = {
-                "csrf_token": csrf_token,
-                "action": "enter",
-                "ftaa": ftaa,
-                "bfaa": BFAA,
-                "_tta": "176",
-                "handleOrEmail": username,
-                "password": password,
-                "remember": "on",
-            }
+            # Check if we're on the login page
+            max_wait = 30
+            waited = 0
+            while waited < max_wait:
+                if 'enter' in page.url or 'login' in page.url.lower():
+                    break
+                time.sleep(1)
+                waited += 1
 
-            # Important: Add headers including X-Csrf-Token
-            post_headers = {
-                "Referer": LOGIN_URL,
-                "Origin": BASE_URL,
-                "Content-Type": "application/x-www-form-urlencoded",
-                "X-Csrf-Token": csrf_token,
-            }
+            # Fill in login form
+            try:
+                # Find and fill username field
+                handle_input = page.ele('#handleOrEmail') or page.ele('@name=handleOrEmail')
+                if handle_input:
+                    handle_input.clear()
+                    handle_input.input(username)
+                else:
+                    raise AuthenticationError("Could not find username field")
 
-            # Submit login
-            response = self.client.post(LOGIN_URL, data=login_data, headers=post_headers)
-            response.raise_for_status()
+                # Find and fill password field
+                password_input = page.ele('#password') or page.ele('@name=password')
+                if password_input:
+                    password_input.clear()
+                    password_input.input(password)
+                else:
+                    raise AuthenticationError("Could not find password field")
 
-            # Check if login was successful
-            # Codeforces redirects to home page on successful login
-            # If we're still on /enter or see login form, login failed
-            if "/enter" in str(response.url) or "handleOrEmail" in response.text:
-                # Try to extract error message
-                soup = BeautifulSoup(response.text, 'lxml')
-                error_span = soup.find('span', class_='error')
-                error_div = soup.find('div', class_='error')
+                # Check "Remember me"
+                remember = page.ele('#remember') or page.ele('@name=remember')
+                if remember and not remember.attr('checked'):
+                    remember.click()
 
-                error_msg = "Invalid username or password"
-                if error_span:
-                    error_msg = error_span.get_text().strip()
-                elif error_div:
-                    error_msg = error_div.get_text().strip()
+                # Find and click submit button
+                submit_btn = page.ele('@value=Login') or page.ele('xpath://input[@type="submit"]') or page.ele('.submit')
+                if submit_btn:
+                    submit_btn.click()
+                else:
+                    # Try pressing Enter
+                    password_input.input('\n')
 
+            except Exception as e:
+                raise AuthenticationError(f"Could not fill login form: {e}")
+
+            # Wait for login to complete
+            print("Logging in...")
+            time.sleep(3)
+
+            # Check if login succeeded (should redirect away from /enter)
+            max_wait = 15
+            waited = 0
+            while waited < max_wait:
+                current_url = page.url
+                if '/enter' not in current_url:
+                    break
+                time.sleep(1)
+                waited += 1
+
+            # Verify login success
+            if '/enter' in page.url:
+                # Try to find error message
+                error_elem = page.ele('.error') or page.ele('xpath://*[contains(@class, "error")]')
+                error_msg = "Login failed - please check your credentials"
+                if error_elem:
+                    error_msg = error_elem.text or error_msg
+                page.quit()
                 raise AuthenticationError(error_msg)
 
-            # Update CSRF token from response
-            new_csrf = self.extract_csrf_token(response.text)
-            if new_csrf:
-                self.csrf_token = new_csrf
+            # Extract cookies from browser
+            cookies = {}
+            for cookie in page.cookies():
+                cookies[cookie['name']] = cookie['value']
+
+            # Get CSRF token from page
+            html = page.html
+            self.csrf_token = self.extract_csrf_token(html)
+
+            # Close browser
+            page.quit()
 
             # Save session
-            self.save_session(username)
+            self.save_session(username, cookies)
 
-        except cloudscraper.exceptions.CloudflareChallengeError as e:
-            raise AuthenticationError(f"Cloudflare challenge failed: {e}")
+            # Update HTTP client with cookies
+            for name, value in cookies.items():
+                self.client.cookies.set(name, value)
+
+            print("Login successful!")
+
+        except AuthenticationError:
+            raise
         except Exception as e:
-            if "AuthenticationError" in type(e).__name__:
-                raise
-            raise AuthenticationError(f"Network error during login: {e}")
+            raise AuthenticationError(f"Browser login failed: {e}")
 
     def is_authenticated(self) -> bool:
-        """
-        Check if currently authenticated.
-
-        Returns:
-            True if authenticated, False otherwise
-        """
+        """Check if currently authenticated."""
         try:
-            # Try to access a page that requires authentication
             response = self.client.get(f"{BASE_URL}/profile")
-            # If redirected to login, not authenticated
-            return "/enter" not in str(response.url)
-
+            return "/enter" not in str(response.url) and "handleOrEmail" not in response.text
         except Exception:
             return False
 
     def get_csrf_token(self, url: str) -> str:
-        """
-        Get CSRF token from a page.
-
-        Args:
-            url: URL to fetch
-
-        Returns:
-            CSRF token
-
-        Raises:
-            AuthenticationError: If token cannot be retrieved
-        """
+        """Get CSRF token from a page."""
         try:
             response = self.client.get(url)
             response.raise_for_status()
@@ -325,31 +298,14 @@ class Session:
             raise AuthenticationError(f"Failed to get CSRF token: {e}")
 
     def get(self, url: str, **kwargs):
-        """
-        Make a GET request.
-
-        Args:
-            url: URL to fetch
-            **kwargs: Additional arguments for requests
-
-        Returns:
-            Response object
-        """
+        """Make a GET request."""
         return self.client.get(url, **kwargs)
 
     def post(self, url: str, **kwargs):
-        """
-        Make a POST request.
-
-        Args:
-            url: URL to post to
-            **kwargs: Additional arguments for requests
-
-        Returns:
-            Response object
-        """
+        """Make a POST request."""
         return self.client.post(url, **kwargs)
 
     def close(self) -> None:
         """Close the session."""
-        self.client.close()
+        if self.client:
+            self.client.close()

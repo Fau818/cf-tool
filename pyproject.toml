@@ -33,6 +33,7 @@ dependencies = [
     "lxml>=4.9.0",
     "rich>=13.0.0",
     "platformdirs>=3.0.0",
+    "DrissionPage>=4.0.0",
 ]
 
 [project.optional-dependencies]
