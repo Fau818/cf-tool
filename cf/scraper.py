@@ -1,14 +1,16 @@
 """
 Web scraping module for fetching problem data from Codeforces.
+
+Uses cloudscraper to bypass Cloudflare protection.
 """
 
 import re
 from typing import Dict, List, Tuple
 
-import httpx
+import cloudscraper
 from bs4 import BeautifulSoup
 
-from cf.constants import REQUEST_TIMEOUT, URL_PATTERNS, USER_AGENT
+from cf.constants import REQUEST_TIMEOUT, URL_PATTERNS
 from cf.utils import NetworkError, ParseError
 
 
@@ -16,10 +18,16 @@ class CodeforceScraper:
     """Scraper for Codeforces website."""
 
     def __init__(self):
-        """Initialize scraper."""
-        self.headers = {
-            "User-Agent": USER_AGENT,
-        }
+        """Initialize scraper with cloudscraper to bypass Cloudflare."""
+        # Create cloudscraper session - this handles Cloudflare challenges
+        self.client = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'darwin',  # macOS
+                'desktop': True,
+            }
+        )
+        self.client.timeout = REQUEST_TIMEOUT
 
     def fetch_problem(
         self, contest_id: str, problem_id: str, contest_type: str = "contest"
@@ -46,13 +54,13 @@ class CodeforceScraper:
         url = pattern.format(cid=contest_id, pid=problem_id.upper())
 
         try:
-            response = httpx.get(
-                url, headers=self.headers, timeout=REQUEST_TIMEOUT, follow_redirects=True
-            )
+            response = self.client.get(url)
             response.raise_for_status()
             return response.text
 
-        except httpx.HTTPError as e:
+        except cloudscraper.exceptions.CloudflareChallengeError as e:
+            raise NetworkError(f"Cloudflare challenge failed: {e}")
+        except Exception as e:
             raise NetworkError(f"Failed to fetch problem: {e}")
 
     def extract_test_cases(self, html: str) -> List[Tuple[str, str]]:

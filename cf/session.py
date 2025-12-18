@@ -1,5 +1,7 @@
 """
 Session and authentication management for Codeforces.
+
+Uses cloudscraper to bypass Cloudflare protection.
 """
 
 import json
@@ -7,9 +9,9 @@ import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
-import httpx
+import cloudscraper
 from bs4 import BeautifulSoup
 
 from cf.constants import BASE_URL, LOGIN_URL, REQUEST_TIMEOUT, USER_AGENT
@@ -20,28 +22,30 @@ class Session:
     """Manages Codeforces session and authentication."""
 
     def __init__(self):
-        """Initialize session."""
+        """Initialize session with cloudscraper to bypass Cloudflare."""
         self.session_file = get_config_dir() / "session"
 
-        # More complete browser headers to avoid being blocked
-        headers = {
-            "User-Agent": USER_AGENT,
+        # Create cloudscraper session - this handles Cloudflare challenges
+        self.client = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'darwin',  # macOS
+                'desktop': True,
+            }
+        )
+
+        # Set timeout
+        self.client.timeout = REQUEST_TIMEOUT
+
+        # Set additional headers
+        self.client.headers.update({
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Encoding": "gzip, deflate, br",
             "DNT": "1",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "same-origin",
-        }
+        })
 
-        self.client = httpx.Client(
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-            follow_redirects=True,
-        )
         self.csrf_token = None
         self.load_session()
 
@@ -88,8 +92,13 @@ class Session:
         # Session expires in 30 days
         expires_at = datetime.now() + timedelta(days=30)
 
+        # Convert cookies to dict
+        cookies_dict = {}
+        for cookie in self.client.cookies:
+            cookies_dict[cookie.name] = cookie.value
+
         session_data = {
-            "cookies": dict(self.client.cookies),
+            "cookies": cookies_dict,
             "csrf_token": self.csrf_token,
             "username": username,
             "expires_at": expires_at.isoformat(),
@@ -146,8 +155,9 @@ class Session:
             AuthenticationError: If login fails
         """
         try:
-            # First, visit the home page to get initial cookies
-            self.client.get(BASE_URL)
+            # First, visit the home page to get initial cookies and pass Cloudflare
+            response = self.client.get(BASE_URL)
+            response.raise_for_status()
 
             # Small delay to mimic human behavior
             time.sleep(0.5)
@@ -207,7 +217,11 @@ class Session:
             # Save session
             self.save_session(username)
 
-        except httpx.HTTPError as e:
+        except cloudscraper.exceptions.CloudflareChallengeError as e:
+            raise AuthenticationError(f"Cloudflare challenge failed: {e}")
+        except Exception as e:
+            if "AuthenticationError" in type(e).__name__:
+                raise
             raise AuthenticationError(f"Network error during login: {e}")
 
     def is_authenticated(self) -> bool:
@@ -223,7 +237,7 @@ class Session:
             # If redirected to login, not authenticated
             return "/enter" not in str(response.url)
 
-        except httpx.HTTPError:
+        except Exception:
             return False
 
     def get_csrf_token(self, url: str) -> str:
@@ -251,8 +265,34 @@ class Session:
             self.csrf_token = csrf_token
             return csrf_token
 
-        except httpx.HTTPError as e:
+        except Exception as e:
             raise AuthenticationError(f"Failed to get CSRF token: {e}")
+
+    def get(self, url: str, **kwargs):
+        """
+        Make a GET request.
+
+        Args:
+            url: URL to fetch
+            **kwargs: Additional arguments for requests
+
+        Returns:
+            Response object
+        """
+        return self.client.get(url, **kwargs)
+
+    def post(self, url: str, **kwargs):
+        """
+        Make a POST request.
+
+        Args:
+            url: URL to post to
+            **kwargs: Additional arguments for requests
+
+        Returns:
+            Response object
+        """
+        return self.client.post(url, **kwargs)
 
     def close(self) -> None:
         """Close the session."""
