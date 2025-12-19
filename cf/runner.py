@@ -4,8 +4,9 @@ Code execution module for running solutions.
 
 import subprocess
 import sys
+import time as time_module
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional
 
 from cf.config import Config
 
@@ -30,6 +31,71 @@ class ExecutionResult:
         self.error = error
 
 
+def _run_process(
+    cmd: List[str], input_data: str, timeout: float, cwd: Path
+) -> ExecutionResult:
+    """
+    Run a process with the given command and input.
+
+    Args:
+        cmd: Command and arguments as a list
+        input_data: Input data to pipe to stdin
+        timeout: Timeout in seconds
+        cwd: Working directory
+
+    Returns:
+        ExecutionResult object
+    """
+    start_time = time_module.time()
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+        )
+
+        try:
+            stdout, stderr = process.communicate(
+                input=input_data.encode('utf-8'), timeout=timeout
+            )
+
+            elapsed_time = time_module.time() - start_time
+
+            return ExecutionResult(
+                stdout=stdout.decode('utf-8', errors='replace'),
+                stderr=stderr.decode('utf-8', errors='replace'),
+                returncode=process.returncode,
+                time=elapsed_time,
+            )
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            elapsed_time = time_module.time() - start_time
+
+            return ExecutionResult(
+                stdout="",
+                stderr="",
+                returncode=-1,
+                time=elapsed_time,
+                timeout=True,
+                error=f"Time Limit Exceeded ({timeout}s)",
+            )
+
+    except Exception as e:
+        elapsed_time = time_module.time() - start_time
+        return ExecutionResult(
+            stdout="",
+            stderr="",
+            returncode=-1,
+            time=elapsed_time,
+            error=f"Runtime error: {e}",
+        )
+
+
 def run_executable(
     executable: Path, input_data: str, timeout: float = 2.0
 ) -> ExecutionResult:
@@ -44,56 +110,7 @@ def run_executable(
     Returns:
         ExecutionResult object
     """
-    import time
-
-    start_time = time.time()
-
-    try:
-        process = subprocess.Popen(
-            [str(executable)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=executable.parent,
-        )
-
-        try:
-            stdout, stderr = process.communicate(
-                input=input_data.encode('utf-8'), timeout=timeout
-            )
-
-            elapsed_time = time.time() - start_time
-
-            return ExecutionResult(
-                stdout=stdout.decode('utf-8', errors='replace'),
-                stderr=stderr.decode('utf-8', errors='replace'),
-                returncode=process.returncode,
-                time=elapsed_time,
-            )
-
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            elapsed_time = time.time() - start_time
-
-            return ExecutionResult(
-                stdout="",
-                stderr="",
-                returncode=-1,
-                time=elapsed_time,
-                timeout=True,
-                error=f"Time Limit Exceeded ({timeout}s)",
-            )
-
-    except Exception as e:
-        elapsed_time = time.time() - start_time
-        return ExecutionResult(
-            stdout="",
-            stderr="",
-            returncode=-1,
-            time=elapsed_time,
-            error=f"Runtime error: {e}",
-        )
+    return _run_process([str(executable)], input_data, timeout, executable.parent)
 
 
 def run_python(source_file: Path, input_data: str, timeout: float = 2.0) -> ExecutionResult:
@@ -108,59 +125,7 @@ def run_python(source_file: Path, input_data: str, timeout: float = 2.0) -> Exec
     Returns:
         ExecutionResult object
     """
-    import time
-
-    start_time = time.time()
-
-    # Use the same Python interpreter that's running this code
-    python_cmd = sys.executable
-
-    try:
-        process = subprocess.Popen(
-            [python_cmd, str(source_file)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=source_file.parent,
-        )
-
-        try:
-            stdout, stderr = process.communicate(
-                input=input_data.encode('utf-8'), timeout=timeout
-            )
-
-            elapsed_time = time.time() - start_time
-
-            return ExecutionResult(
-                stdout=stdout.decode('utf-8', errors='replace'),
-                stderr=stderr.decode('utf-8', errors='replace'),
-                returncode=process.returncode,
-                time=elapsed_time,
-            )
-
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            elapsed_time = time.time() - start_time
-
-            return ExecutionResult(
-                stdout="",
-                stderr="",
-                returncode=-1,
-                time=elapsed_time,
-                timeout=True,
-                error=f"Time Limit Exceeded ({timeout}s)",
-            )
-
-    except Exception as e:
-        elapsed_time = time.time() - start_time
-        return ExecutionResult(
-            stdout="",
-            stderr="",
-            returncode=-1,
-            time=elapsed_time,
-            error=f"Runtime error: {e}",
-        )
+    return _run_process([sys.executable, str(source_file)], input_data, timeout, source_file.parent)
 
 
 def run_code(
@@ -196,63 +161,10 @@ def run_code(
         return run_python(source_file, input_data, timeout)
 
     elif language == "java":
-        # Java execution is more complex, for now just support basic case
         if executable is None:
             raise ValueError("Class file required for Java")
-
-        import time
-
-        start_time = time.time()
-
-        # Extract class name from source file
         classname = source_file.stem
-
-        try:
-            process = subprocess.Popen(
-                ["java", classname],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=source_file.parent,
-            )
-
-            try:
-                stdout, stderr = process.communicate(
-                    input=input_data.encode('utf-8'), timeout=timeout
-                )
-
-                elapsed_time = time.time() - start_time
-
-                return ExecutionResult(
-                    stdout=stdout.decode('utf-8', errors='replace'),
-                    stderr=stderr.decode('utf-8', errors='replace'),
-                    returncode=process.returncode,
-                    time=elapsed_time,
-                )
-
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-                elapsed_time = time.time() - start_time
-
-                return ExecutionResult(
-                    stdout="",
-                    stderr="",
-                    returncode=-1,
-                    time=elapsed_time,
-                    timeout=True,
-                    error=f"Time Limit Exceeded ({timeout}s)",
-                )
-
-        except Exception as e:
-            elapsed_time = time.time() - start_time
-            return ExecutionResult(
-                stdout="",
-                stderr="",
-                returncode=-1,
-                time=elapsed_time,
-                error=f"Runtime error: {e}",
-            )
+        return _run_process(["java", classname], input_data, timeout, source_file.parent)
 
     else:
         raise ValueError(f"Unsupported language: {language}")

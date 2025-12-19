@@ -12,6 +12,17 @@ from cf.constants import DEFAULT_CONFIG
 from cf.utils import get_config_dir
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Deep merge two dictionaries, with override taking precedence."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 class Config:
     """Configuration manager for cf-tool."""
 
@@ -29,18 +40,12 @@ class Config:
             Configuration dictionary
         """
         if not self.config_file.exists():
-            # Return default config if file doesn't exist
             return DEFAULT_CONFIG.copy()
 
         try:
-            with open(self.config_file, 'r') as f:
-                loaded_config = json.load(f)
-
-            # Merge with defaults (in case new keys were added)
-            config = DEFAULT_CONFIG.copy()
-            config.update(loaded_config)
-            return config
-
+            loaded_config = json.loads(self.config_file.read_text())
+            # Deep merge with defaults (in case new keys were added)
+            return _deep_merge(DEFAULT_CONFIG, loaded_config)
         except (json.JSONDecodeError, IOError) as e:
             print(f"Warning: Failed to load config file: {e}")
             return DEFAULT_CONFIG.copy()
@@ -49,8 +54,7 @@ class Config:
         """Save configuration to file."""
         try:
             self.config_dir.mkdir(parents=True, exist_ok=True)
-            with open(self.config_file, 'w') as f:
-                json.dump(self.data, f, indent=2)
+            self.config_file.write_text(json.dumps(self.data, indent=2))
         except IOError as e:
             print(f"Error: Failed to save config file: {e}")
 

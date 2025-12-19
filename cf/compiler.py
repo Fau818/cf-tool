@@ -4,11 +4,62 @@ Code compilation module for C++ and other compiled languages.
 
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from cf.config import Config
 from cf.constants import DEFAULT_COMPILERS
 from cf.utils import CompilationError
+
+
+def _compile(
+    cmd: List[str],
+    source_file: Path,
+    output_file: Path,
+    use_shell: bool = False,
+) -> Path:
+    """
+    Compile source file using the given command.
+
+    Args:
+        cmd: Compiler command as list or string (if use_shell=True)
+        source_file: Path to source file
+        output_file: Path to output executable
+        use_shell: Whether to use shell execution
+
+    Returns:
+        Path to compiled executable
+
+    Raises:
+        CompilationError: If compilation fails
+    """
+    try:
+        if use_shell:
+            result = subprocess.run(
+                ' '.join(cmd) if isinstance(cmd, list) else cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=source_file.parent,
+            )
+        else:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=source_file.parent,
+            )
+
+        if result.returncode != 0:
+            error_msg = result.stderr if result.stderr else result.stdout
+            raise CompilationError(f"Compilation failed:\n{error_msg}")
+
+        if output_file.suffix != '.class' and not output_file.exists():
+            raise CompilationError("Compilation succeeded but executable not found")
+
+        return output_file
+
+    except subprocess.SubprocessError as e:
+        raise CompilationError(f"Compilation error: {e}")
 
 
 def compile_cpp(source_file: Path, output_file: Optional[Path] = None) -> Path:
@@ -28,46 +79,22 @@ def compile_cpp(source_file: Path, output_file: Optional[Path] = None) -> Path:
     if not source_file.exists():
         raise CompilationError(f"Source file not found: {source_file}")
 
-    # Default output file is same name without extension
     if output_file is None:
         output_file = source_file.with_suffix('')
 
-    # Get compiler command from config
     config = Config()
     compiler_cmd = config.get_compiler_command("cpp")
 
     if not compiler_cmd:
-        # Use default compiler command
         compiler_cmd = DEFAULT_COMPILERS["cpp"]
 
-    # Build command
-    # Replace placeholders
-    cmd = compiler_cmd.format(source=str(source_file), output=str(output_file))
-
-    # If format string didn't have placeholders, build manually
-    if "{source}" not in compiler_cmd:
+    # Build command with placeholders
+    if "{source}" in compiler_cmd:
+        cmd = compiler_cmd.format(source=str(source_file), output=str(output_file))
+    else:
         cmd = f"{compiler_cmd} {source_file} -o {output_file}"
 
-    try:
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=source_file.parent,
-        )
-
-        if result.returncode != 0:
-            error_msg = result.stderr if result.stderr else result.stdout
-            raise CompilationError(f"Compilation failed:\n{error_msg}")
-
-        if not output_file.exists():
-            raise CompilationError("Compilation succeeded but executable not found")
-
-        return output_file
-
-    except subprocess.SubprocessError as e:
-        raise CompilationError(f"Compilation error: {e}")
+    return _compile([cmd], source_file, output_file, use_shell=True)
 
 
 def compile_source(source_file: Path, language: str) -> Optional[Path]:
@@ -86,8 +113,8 @@ def compile_source(source_file: Path, language: str) -> Optional[Path]:
     """
     if language in ["cpp", "c++"]:
         return compile_cpp(source_file)
+
     elif language == "c":
-        # Similar to C++ but with different compiler
         config = Config()
         compiler_cmd = config.get_compiler_command("c")
         if not compiler_cmd:
@@ -95,44 +122,14 @@ def compile_source(source_file: Path, language: str) -> Optional[Path]:
 
         output_file = source_file.with_suffix('')
         cmd = f"{compiler_cmd} {source_file} -o {output_file}"
-
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                cwd=source_file.parent,
-            )
-
-            if result.returncode != 0:
-                raise CompilationError(f"Compilation failed:\n{result.stderr}")
-
-            return output_file
-
-        except subprocess.SubprocessError as e:
-            raise CompilationError(f"Compilation error: {e}")
+        return _compile([cmd], source_file, output_file, use_shell=True)
 
     elif language in ["python", "py"]:
-        # Python is interpreted, no compilation needed
         return None
+
     elif language == "java":
-        # Java compilation
-        try:
-            result = subprocess.run(
-                ["javac", str(source_file)],
-                capture_output=True,
-                text=True,
-                cwd=source_file.parent,
-            )
+        output_file = source_file.with_suffix('.class')
+        return _compile(["javac", str(source_file)], source_file, output_file)
 
-            if result.returncode != 0:
-                raise CompilationError(f"Compilation failed:\n{result.stderr}")
-
-            # Return the class file path (same name but .class)
-            return source_file.with_suffix('.class')
-
-        except subprocess.SubprocessError as e:
-            raise CompilationError(f"Compilation error: {e}")
     else:
         raise CompilationError(f"Unsupported language: {language}")

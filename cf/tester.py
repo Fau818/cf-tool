@@ -26,12 +26,29 @@ def find_test_cases(directory: Path) -> List[int]:
 
     for file in directory.iterdir():
         if file.is_file():
-            # Match in1.txt, in2.txt, etc.
             match = re.match(r'in(\d+)\.txt', file.name)
             if match:
                 test_numbers.add(int(match.group(1)))
 
     return sorted(test_numbers)
+
+
+def _make_result(
+    test_num: int,
+    passed: bool,
+    time: float,
+    error: Optional[str] = None,
+    expected: Optional[str] = None,
+    actual: Optional[str] = None,
+) -> Dict:
+    """Create a test result dictionary."""
+    result = {"test_number": test_num, "passed": passed, "time": time}
+    if error:
+        result["error"] = error
+    if expected is not None:
+        result["expected"] = expected
+        result["actual"] = actual
+    return result
 
 
 def run_tests(solution_file: Optional[str] = None) -> List[Dict]:
@@ -55,7 +72,6 @@ def run_tests(solution_file: Optional[str] = None) -> List[Dict]:
             raise FileNotFoundError(f"Solution file not found: {solution_file}")
         problem_dir = solution_path.parent
     else:
-        # Auto-detect solution file in current directory
         problem_dir = Path.cwd()
         solution_path = find_solution_file(problem_dir)
 
@@ -80,15 +96,7 @@ def run_tests(solution_file: Optional[str] = None) -> List[Dict]:
         try:
             executable = compile_source(solution_path, language)
         except Exception as e:
-            # Return compilation error as a test result
-            return [
-                {
-                    "test_number": 0,
-                    "passed": False,
-                    "error": f"Compilation failed: {e}",
-                    "time": 0.0,
-                }
-            ]
+            return [_make_result(0, False, 0.0, error=f"Compilation failed: {e}")]
 
     # Run tests
     results = []
@@ -98,95 +106,37 @@ def run_tests(solution_file: Optional[str] = None) -> List[Dict]:
         output_file = problem_dir / TEST_OUTPUT_PATTERN.format(test_num)
 
         if not input_file.exists() or not output_file.exists():
-            results.append(
-                {
-                    "test_number": test_num,
-                    "passed": False,
-                    "error": "Test case files not found",
-                    "time": 0.0,
-                }
-            )
+            results.append(_make_result(test_num, False, 0.0, error="Test case files not found"))
             continue
 
-        # Read input and expected output
-        with open(input_file, 'r') as f:
-            input_data = f.read()
+        input_data = input_file.read_text()
+        expected_output = output_file.read_text()
 
-        with open(output_file, 'r') as f:
-            expected_output = f.read()
-
-        # Run code
         try:
             exec_result = run_code(solution_path, language, input_data, executable)
 
-            if exec_result.timeout:
-                results.append(
-                    {
-                        "test_number": test_num,
-                        "passed": False,
-                        "error": exec_result.error,
-                        "time": exec_result.time,
-                    }
-                )
-                continue
-
-            if exec_result.error:
-                results.append(
-                    {
-                        "test_number": test_num,
-                        "passed": False,
-                        "error": exec_result.error,
-                        "time": exec_result.time,
-                    }
-                )
+            if exec_result.timeout or exec_result.error:
+                results.append(_make_result(test_num, False, exec_result.time, error=exec_result.error))
                 continue
 
             if exec_result.returncode != 0:
                 error_msg = "Runtime Error"
                 if exec_result.stderr:
                     error_msg += f": {exec_result.stderr[:200]}"
-                results.append(
-                    {
-                        "test_number": test_num,
-                        "passed": False,
-                        "error": error_msg,
-                        "time": exec_result.time,
-                    }
-                )
+                results.append(_make_result(test_num, False, exec_result.time, error=error_msg))
                 continue
 
             # Compare outputs
             actual_output = exec_result.stdout
-            actual_normalized = normalize_whitespace(actual_output)
-            expected_normalized = normalize_whitespace(expected_output)
-
-            if actual_normalized == expected_normalized:
-                results.append(
-                    {
-                        "test_number": test_num,
-                        "passed": True,
-                        "time": exec_result.time,
-                    }
-                )
+            if normalize_whitespace(actual_output) == normalize_whitespace(expected_output):
+                results.append(_make_result(test_num, True, exec_result.time))
             else:
-                results.append(
-                    {
-                        "test_number": test_num,
-                        "passed": False,
-                        "expected": expected_output,
-                        "actual": actual_output,
-                        "time": exec_result.time,
-                    }
-                )
+                results.append(_make_result(
+                    test_num, False, exec_result.time,
+                    expected=expected_output, actual=actual_output
+                ))
 
         except Exception as e:
-            results.append(
-                {
-                    "test_number": test_num,
-                    "passed": False,
-                    "error": str(e),
-                    "time": 0.0,
-                }
-            )
+            results.append(_make_result(test_num, False, 0.0, error=str(e)))
 
     return results

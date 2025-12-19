@@ -78,30 +78,23 @@ class CodeforceScraper:
         """
         try:
             soup = BeautifulSoup(html, 'lxml')
-
-            # Find sample tests section
             test_cases = []
 
-            # Method 1: Look for divs with class 'sample-test'
+            # Look for divs with class 'sample-test'
             sample_test = soup.find('div', class_='sample-test')
 
             if sample_test:
-                # Find all input divs
                 inputs = sample_test.find_all('div', class_='input')
                 outputs = sample_test.find_all('div', class_='output')
 
                 for inp, out in zip(inputs, outputs):
-                    # Get the <pre> tag content
                     input_pre = inp.find('pre')
                     output_pre = out.find('pre')
 
                     if input_pre and output_pre:
-                        input_text = input_pre.get_text()
-                        output_text = output_pre.get_text()
-
-                        # Clean up the text (remove extra whitespace but preserve structure)
-                        input_text = input_text.strip()
-                        output_text = output_text.strip()
+                        # Handle both <br> tags and <div> wrapped lines
+                        input_text = self._extract_pre_text(input_pre)
+                        output_text = self._extract_pre_text(output_pre)
 
                         test_cases.append((input_text, output_text))
 
@@ -110,8 +103,24 @@ class CodeforceScraper:
 
             return test_cases
 
+        except ParseError:
+            raise
         except Exception as e:
             raise ParseError(f"Failed to parse test cases: {e}")
+
+    def _extract_pre_text(self, pre_tag) -> str:
+        """Extract text from a <pre> tag, handling various formats."""
+        # Check if content is wrapped in divs (newer Codeforces format)
+        divs = pre_tag.find_all('div')
+        if divs:
+            lines = [div.get_text() for div in divs]
+            return '\n'.join(lines).strip()
+
+        # Handle <br> tags by converting to newlines
+        for br in pre_tag.find_all('br'):
+            br.replace_with('\n')
+
+        return pre_tag.get_text().strip()
 
     def extract_problem_metadata(self, html: str) -> Dict[str, str]:
         """

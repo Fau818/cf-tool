@@ -9,8 +9,7 @@ from typing import Dict
 from cf.config import Config
 from cf.constants import PROBLEM_METADATA_FILE, SOLUTION_FILE_NAMES, TEST_INPUT_PATTERN, TEST_OUTPUT_PATTERN
 from cf.scraper import CodeforceScraper
-from cf.template import generate_from_template
-from cf.utils import ensure_directory, ParseError
+from cf.utils import ensure_directory
 
 
 def parse_problem(
@@ -77,35 +76,8 @@ def parse_problem(
     solution_filename = SOLUTION_FILE_NAMES.get(language, f"solution.{language}")
     solution_file = problem_dir / solution_filename
 
-    # Check if solution file already exists
     if not solution_file.exists():
-        try:
-            # Try to generate from template
-            config = Config()
-            template_path = config.get_template_path(language)
-
-            if template_path and template_path.exists():
-                # Copy template to solution file
-                with open(template_path, 'r') as f:
-                    template_content = f.read()
-
-                # Simple variable substitution
-                template_content = template_content.replace("$PROBLEM$", problem_id)
-                template_content = template_content.replace("$CONTEST$", contest_id)
-
-                with open(solution_file, 'w') as f:
-                    f.write(template_content)
-            else:
-                # Create empty solution file
-                with open(solution_file, 'w') as f:
-                    if language == "cpp":
-                        f.write("#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n")
-                    elif language in ["python", "py"]:
-                        f.write("# Solution for problem " + problem_id + "\n\n")
-
-        except Exception as e:
-            # If template generation fails, just create empty file
-            solution_file.touch()
+        _create_solution_file(solution_file, language, contest_id, problem_id)
 
     return {
         "contest_id": contest_id,
@@ -115,3 +87,29 @@ def parse_problem(
         "solution_file": str(solution_file),
         "metadata": metadata,
     }
+
+
+# Default solution templates for when no custom template exists
+DEFAULT_TEMPLATES = {
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n",
+    "python": "# Solution for problem {problem_id}\n\n",
+    "py": "# Solution for problem {problem_id}\n\n",
+}
+
+
+def _create_solution_file(solution_file: Path, language: str, contest_id: str, problem_id: str) -> None:
+    """Create a solution file from template or default content."""
+    try:
+        config = Config()
+        template_path = config.get_template_path(language)
+
+        if template_path and template_path.exists():
+            content = template_path.read_text()
+            content = content.replace("$PROBLEM$", problem_id)
+            content = content.replace("$CONTEST$", contest_id)
+        else:
+            content = DEFAULT_TEMPLATES.get(language, "").format(problem_id=problem_id)
+
+        solution_file.write_text(content)
+    except Exception:
+        solution_file.touch()

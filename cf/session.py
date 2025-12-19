@@ -157,6 +157,7 @@ class Session:
         print("Opening browser for Codeforces login...")
         print("(This is needed to bypass Cloudflare protection)")
 
+        page = None
         try:
             # Configure browser options
             options = ChromiumOptions()
@@ -180,83 +181,37 @@ class Session:
             time.sleep(2)
 
             # Check if we're on the login page
-            max_wait = 30
-            waited = 0
-            while waited < max_wait:
+            for _ in range(30):
                 if 'enter' in page.url or 'login' in page.url.lower():
                     break
                 time.sleep(1)
-                waited += 1
 
             # Fill in login form
-            try:
-                # Find and fill username field
-                handle_input = page.ele('#handleOrEmail') or page.ele('@name=handleOrEmail')
-                if handle_input:
-                    handle_input.clear()
-                    handle_input.input(username)
-                else:
-                    raise AuthenticationError("Could not find username field")
-
-                # Find and fill password field
-                password_input = page.ele('#password') or page.ele('@name=password')
-                if password_input:
-                    password_input.clear()
-                    password_input.input(password)
-                else:
-                    raise AuthenticationError("Could not find password field")
-
-                # Check "Remember me"
-                remember = page.ele('#remember') or page.ele('@name=remember')
-                if remember and not remember.attr('checked'):
-                    remember.click()
-
-                # Find and click submit button
-                submit_btn = page.ele('@value=Login') or page.ele('xpath://input[@type="submit"]') or page.ele('.submit')
-                if submit_btn:
-                    submit_btn.click()
-                else:
-                    # Try pressing Enter
-                    password_input.input('\n')
-
-            except Exception as e:
-                raise AuthenticationError(f"Could not fill login form: {e}")
+            self._fill_login_form(page, username, password)
 
             # Wait for login to complete
             print("Logging in...")
             time.sleep(3)
 
             # Check if login succeeded (should redirect away from /enter)
-            max_wait = 15
-            waited = 0
-            while waited < max_wait:
-                current_url = page.url
-                if '/enter' not in current_url:
+            for _ in range(15):
+                if '/enter' not in page.url:
                     break
                 time.sleep(1)
-                waited += 1
 
             # Verify login success
             if '/enter' in page.url:
-                # Try to find error message
                 error_elem = page.ele('.error') or page.ele('xpath://*[contains(@class, "error")]')
                 error_msg = "Login failed - please check your credentials"
                 if error_elem:
                     error_msg = error_elem.text or error_msg
-                page.quit()
                 raise AuthenticationError(error_msg)
 
             # Extract cookies from browser
-            cookies = {}
-            for cookie in page.cookies():
-                cookies[cookie['name']] = cookie['value']
+            cookies = {cookie['name']: cookie['value'] for cookie in page.cookies()}
 
             # Get CSRF token from page
-            html = page.html
-            self.csrf_token = self.extract_csrf_token(html)
-
-            # Close browser
-            page.quit()
+            self.csrf_token = self.extract_csrf_token(page.html)
 
             # Save session
             self.save_session(username, cookies)
@@ -271,6 +226,40 @@ class Session:
             raise
         except Exception as e:
             raise AuthenticationError(f"Browser login failed: {e}")
+        finally:
+            if page is not None:
+                try:
+                    page.quit()
+                except Exception:
+                    pass
+
+    def _fill_login_form(self, page, username: str, password: str) -> None:
+        """Fill in the login form fields."""
+        # Find and fill username field
+        handle_input = page.ele('#handleOrEmail') or page.ele('@name=handleOrEmail')
+        if not handle_input:
+            raise AuthenticationError("Could not find username field")
+        handle_input.clear()
+        handle_input.input(username)
+
+        # Find and fill password field
+        password_input = page.ele('#password') or page.ele('@name=password')
+        if not password_input:
+            raise AuthenticationError("Could not find password field")
+        password_input.clear()
+        password_input.input(password)
+
+        # Check "Remember me"
+        remember = page.ele('#remember') or page.ele('@name=remember')
+        if remember and not remember.attr('checked'):
+            remember.click()
+
+        # Find and click submit button
+        submit_btn = page.ele('@value=Login') or page.ele('xpath://input[@type="submit"]') or page.ele('.submit')
+        if submit_btn:
+            submit_btn.click()
+        else:
+            password_input.input('\n')
 
     def is_authenticated(self) -> bool:
         """Check if currently authenticated."""

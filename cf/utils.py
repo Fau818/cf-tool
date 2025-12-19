@@ -2,7 +2,6 @@
 Utility functions for cf-tool.
 """
 
-import os
 import re
 from pathlib import Path
 from typing import Optional, Tuple
