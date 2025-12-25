@@ -180,32 +180,41 @@ class Session:
             # Wait for login page to load
             time.sleep(2)
 
-            # Check if we're on the login page
-            for _ in range(30):
-                if 'enter' in page.url or 'login' in page.url.lower():
-                    break
-                time.sleep(1)
-
-            # Fill in login form
-            self._fill_login_form(page, username, password)
-
-            # Wait for login to complete
-            print("Logging in...")
-            time.sleep(3)
-
-            # Check if login succeeded (should redirect away from /enter)
-            for _ in range(15):
+            # Check if already logged in (redirected away from /enter) or on login page
+            on_login_page = False
+            for _ in range(10):
                 if '/enter' not in page.url:
+                    # Redirected away - already logged in
+                    break
+                # Check if login form exists
+                if page.ele('#handleOrEmail'):
+                    on_login_page = True
                     break
                 time.sleep(1)
 
-            # Verify login success
-            if '/enter' in page.url:
-                error_elem = page.ele('.error') or page.ele('xpath://*[contains(@class, "error")]')
-                error_msg = "Login failed - please check your credentials"
-                if error_elem:
-                    error_msg = error_elem.text or error_msg
-                raise AuthenticationError(error_msg)
+            if on_login_page:
+                # Fill in login form
+                self._fill_login_form(page, username, password)
+
+                # Wait for login to complete
+                print("Logging in...")
+                time.sleep(3)
+
+                # Check if login succeeded (should redirect away from /enter)
+                for _ in range(15):
+                    if '/enter' not in page.url:
+                        break
+                    time.sleep(1)
+
+                # Verify login success
+                if '/enter' in page.url:
+                    error_elem = page.ele('.error') or page.ele('xpath://*[contains(@class, "error")]')
+                    error_msg = "Login failed - please check your credentials"
+                    if error_elem:
+                        error_msg = error_elem.text or error_msg
+                    raise AuthenticationError(error_msg)
+            else:
+                print("Already logged in, extracting session...")
 
             # Extract cookies from browser
             cookies = {cookie['name']: cookie['value'] for cookie in page.cookies()}
