@@ -39,6 +39,31 @@ class CodeforceScraper:
         )
         self.client.timeout = REQUEST_TIMEOUT
 
+    def _get_with_retry(self, url: str, max_retries: int = 3) -> str:
+        """Fetch URL with retry logic for transient failures."""
+        import time
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                response = self.client.get(url)
+                response.raise_for_status()
+                return response.text
+            except cloudscraper.exceptions.CloudflareChallengeError as e:
+                raise NetworkError(f"Cloudflare challenge failed: {e}")
+            except (ConnectionError, TimeoutError) as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    time.sleep(wait)
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    time.sleep(wait)
+
+        raise NetworkError(f"Failed after {max_retries} attempts: {last_error}")
+
     def fetch_problem(
         self, contest_id: str, problem_id: str, contest_type: str = "contest"
     ) -> str:
@@ -56,22 +81,12 @@ class CodeforceScraper:
         Raises:
             NetworkError: If request fails
         """
-        # Get URL pattern
         pattern = URL_PATTERNS.get(contest_type)
         if not pattern:
             raise ValueError(f"Unknown contest type: {contest_type}")
 
         url = pattern.format(cid=contest_id, pid=problem_id.upper())
-
-        try:
-            response = self.client.get(url)
-            response.raise_for_status()
-            return response.text
-
-        except cloudscraper.exceptions.CloudflareChallengeError as e:
-            raise NetworkError(f"Cloudflare challenge failed: {e}")
-        except Exception as e:
-            raise NetworkError(f"Failed to fetch problem: {e}")
+        return self._get_with_retry(url)
 
     def extract_test_cases(self, html: str) -> List[Tuple[str, str]]:
         """
@@ -205,14 +220,10 @@ class CodeforceScraper:
         else:
             url = f"https://codeforces.com/contest/{contest_id}"
 
-        try:
-            response = self.client.get(url)
-            response.raise_for_status()
-        except Exception as e:
-            raise NetworkError(f"Failed to fetch contest page: {e}")
+        html = self._get_with_retry(url)
 
         try:
-            soup = BeautifulSoup(response.text, 'lxml')
+            soup = BeautifulSoup(html, 'lxml')
             problems = []
 
             table = soup.find('table', class_='problems')

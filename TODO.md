@@ -10,44 +10,43 @@ Feature comparison between the original Go-based [cf-tool](https://github.com/xa
 
 ## Commands
 
-### [~] `config` - Configuration Management
+### [x] `config` - Configuration Management
 
 - [x] `config set <key> <value>` - Set a config value
 - [x] `config get <key>` - Get a config value
 - [x] `config show` - Show all config
 - [x] `config login` - Login to Codeforces (browser-based, Cloudflare bypass)
-- [ ] Interactive config menu (original has a guided setup wizard)
-- [ ] Template management: add/delete templates with aliases
-- [ ] Template management: set default template
+- [x] `config wizard` - Interactive setup wizard
+- [x] `config add-template` / `config remove-template` / `config templates` - Template management
 - [ ] Proxy settings configuration
 - [ ] Folder naming configuration (custom directory patterns)
 
-### [~] `parse` - Parse Problems & Download Test Cases
+### [x] `parse` - Parse Problems & Download Test Cases
 
 - [x] Parse single problem: `cf parse 1000A` or `cf parse 1000 A`
 - [x] Download sample test cases (in/out files)
 - [x] Generate solution file from template
 - [x] Support contest/gym/problemset/group types
 - [x] Parse entire contest: `cf parse 1000` (download all problems A-Z)
-- [ ] Auto-detect contest/problem from current directory
 
 ### [x] `gen` - Generate Code from Template
 
 - [x] Generate solution file with template substitution
 - [x] Support `$PROBLEM$` and `$CONTEST$` variables
-- [ ] Template alias selection (choose from multiple templates)
-- [ ] Filename collision handling with numeric suffixes
+- [x] Template alias selection (`--alias` flag)
+- [x] Filename collision handling with numeric suffixes
+- [x] Auto-detect from current directory
 - [ ] Additional template variables ($%path%$, $%full%$, $%file%$, $%rand%$)
 
-### [~] `test` - Local Testing
+### [x] `test` - Local Testing
 
 - [x] Auto-detect solution file
 - [x] Run against all sample test cases
 - [x] Color-coded pass/fail results
 - [x] Execution time display
 - [x] Whitespace-normalized comparison
-- [ ] Pre-test script execution (BeforeScript)
-- [ ] Post-test script execution (AfterScript)
+- [x] Pre-test script execution (before_script config)
+- [x] Post-test script execution (after_script config)
 - [ ] Custom checker support
 
 ### [x] `submit` - Submit Solution
@@ -56,6 +55,8 @@ Feature comparison between the original Go-based [cf-tool](https://github.com/xa
 - [x] Auto-detect solution file and language
 - [x] Confirmation prompt before submission
 - [x] Auto-watch submission after submit
+- [x] Auto-detect from current directory
+- [x] Auto re-login on session expiry
 
 ### [x] `watch` - Watch Submissions
 
@@ -121,14 +122,26 @@ Feature comparison between the original Go-based [cf-tool](https://github.com/xa
 - [x] Auto-detect contest_id/problem_id from current working directory
 - [x] Allow running `cf submit`, `cf open`, `cf gen` without explicit problem ID when inside a problem directory
 
-### [ ] Enhanced Template System
+### [x] Enhanced Template System
 
-- [ ] Multiple named templates with aliases
+- [x] Multiple named templates with aliases
+- [x] Add/remove/list templates via config subcommands
+- [x] Template alias selection in gen command
 - [ ] Custom compile/run scripts per template
 - [ ] More template variables (author, date, file paths)
 
-### [ ] Improved Error Handling
+### [x] Improved Error Handling
 
-- [ ] Auto re-login on session expiry
-- [ ] Better network error messages
-- [ ] Retry logic for transient failures
+- [x] Auto re-login on session expiry (interactive prompt)
+- [x] Retry logic for transient network failures (exponential backoff)
+- [x] Better error messages from session/scraper
+
+## Remaining Nice-to-Haves
+
+- [ ] Proxy settings
+- [ ] Folder naming configuration
+- [ ] Custom checker support for test
+- [ ] More template variables
+- [ ] Color-code problem list by user's AC/WA status
+- [ ] Download full source in clone command (auth required)
+- [ ] Automatic contest registration in race command

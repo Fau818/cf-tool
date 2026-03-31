@@ -145,3 +145,56 @@ class Config:
         """
         compilers = self.data.get("compiler", {})
         return compilers.get(language)
+
+    # --- Template management ---
+
+    def get_template_list(self) -> list:
+        """Get list of named templates."""
+        return self.data.get("template_list", [])
+
+    def add_template(self, alias: str, lang: str, path: str, default: bool = False) -> None:
+        """Add a named template."""
+        templates = self.data.setdefault("template_list", [])
+
+        # Remove existing with same alias
+        templates[:] = [t for t in templates if t.get("alias") != alias]
+
+        if default:
+            for t in templates:
+                if t.get("lang") == lang:
+                    t["default"] = False
+
+        templates.append({
+            "alias": alias,
+            "lang": lang,
+            "path": path,
+            "default": default,
+        })
+
+        # Also update legacy format for backward compatibility
+        self.data.setdefault("templates", {})[lang] = path
+
+    def remove_template(self, alias: str) -> bool:
+        """Remove a named template by alias. Returns True if found."""
+        templates = self.data.get("template_list", [])
+        before = len(templates)
+        templates[:] = [t for t in templates if t.get("alias") != alias]
+        return len(templates) < before
+
+    def get_template_by_alias(self, alias: str) -> Optional[dict]:
+        """Get a template entry by alias."""
+        for t in self.data.get("template_list", []):
+            if t.get("alias") == alias:
+                return t
+        return None
+
+    def get_default_template(self, lang: str) -> Optional[dict]:
+        """Get the default template for a language."""
+        for t in self.data.get("template_list", []):
+            if t.get("lang") == lang and t.get("default"):
+                return t
+        # Fallback: first template for this language
+        for t in self.data.get("template_list", []):
+            if t.get("lang") == lang:
+                return t
+        return None

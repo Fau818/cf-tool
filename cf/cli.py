@@ -95,6 +95,82 @@ def config_show():
         console.print(f"  {key}: {value}")
 
 
+@config.command("add-template")
+@click.argument("alias")
+@click.argument("path")
+@click.option("--lang", "-l", required=True, help="Language (cpp, python, java, c)")
+@click.option("--default", "-d", "is_default", is_flag=True, help="Set as default for this language")
+def config_add_template(alias, path, lang, is_default):
+    """
+    Add a named code template.
+
+    \b
+    Examples:
+        cf config add-template cpp17 ~/.cf/cpp17.cpp --lang cpp --default
+        cf config add-template pyfast ~/.cf/fast.py --lang python
+    """
+    from cf.config import Config
+    from pathlib import Path as P
+
+    expanded = P(path).expanduser()
+    if not expanded.exists():
+        console.print(f"[yellow]Warning: Template file not found at {expanded}[/yellow]")
+
+    cfg = Config()
+    cfg.add_template(alias, lang, path, is_default)
+    cfg.save()
+    default_str = " [default]" if is_default else ""
+    console.print(f"[green]Added template '{alias}' ({lang}) -> {path}{default_str}[/green]")
+
+
+@config.command("remove-template")
+@click.argument("alias")
+def config_remove_template(alias):
+    """Remove a named template by alias."""
+    from cf.config import Config
+
+    cfg = Config()
+    if cfg.remove_template(alias):
+        cfg.save()
+        console.print(f"[green]Removed template '{alias}'[/green]")
+    else:
+        console.print(f"[red]Template '{alias}' not found[/red]")
+
+
+@config.command("templates")
+def config_list_templates():
+    """List all configured templates."""
+    from cf.config import Config
+    from rich.table import Table
+
+    cfg = Config()
+    templates = cfg.get_template_list()
+
+    if not templates:
+        # Show legacy format
+        legacy = cfg.data.get("templates", {})
+        if legacy:
+            console.print("[bold]Templates (legacy format):[/bold]")
+            for lang, path in legacy.items():
+                console.print(f"  {lang}: {path}")
+        else:
+            console.print("[yellow]No templates configured.[/yellow]")
+            console.print("  Add one: [bold]cf config add-template <alias> <path> --lang <lang>[/bold]")
+        return
+
+    table = Table(title="Templates")
+    table.add_column("Alias", style="cyan")
+    table.add_column("Language", style="white")
+    table.add_column("Path", style="dim")
+    table.add_column("Default", style="green")
+
+    for t in templates:
+        default = "yes" if t.get("default") else ""
+        table.add_row(t.get("alias", ""), t.get("lang", ""), t.get("path", ""), default)
+
+    console.print(table)
+
+
 @config.command("login")
 @click.option("--username", prompt=True, help="Codeforces username")
 @click.option("--password", prompt=True, hide_input=True, help="Codeforces password")
@@ -113,6 +189,66 @@ def config_login(username, password):
         console.print("[green]Successfully logged in![/green]")
     except Exception as e:
         console.print(f"[red]Login failed: {e}[/red]")
+
+
+@config.command("wizard")
+def config_wizard():
+    """Interactive setup wizard for first-time configuration."""
+    from cf.config import Config
+
+    cfg = Config()
+    console.print("[bold cyan]cf-tool Configuration Wizard[/bold cyan]\n")
+
+    # 1. Default language
+    lang = click.prompt(
+        "Default programming language",
+        type=click.Choice(["cpp", "python", "java", "c"]),
+        default=cfg.get("default_language", "cpp"),
+    )
+    cfg.set("default_language", lang)
+
+    # 2. Compiler settings
+    if lang in ("cpp", "c", "java"):
+        from cf.constants import DEFAULT_COMPILERS
+        default_cmd = cfg.get(f"compiler.{lang}") or DEFAULT_COMPILERS.get(lang, "")
+        compiler = click.prompt(f"Compiler command for {lang}", default=default_cmd)
+        cfg.set(f"compiler.{lang}", compiler)
+
+    # 3. Timeout
+    timeout = click.prompt("Test timeout (seconds)", default=cfg.get("timeout", 2.0), type=float)
+    cfg.set("timeout", timeout)
+
+    # 4. Template
+    template_path = click.prompt(
+        f"Template file path for {lang} (leave blank to skip)",
+        default="",
+    )
+    if template_path:
+        from pathlib import Path as P
+        expanded = P(template_path).expanduser()
+        if not expanded.exists():
+            console.print(f"[yellow]Warning: {expanded} does not exist yet[/yellow]")
+        cfg.add_template(lang, lang, template_path, default=True)
+
+    # 5. Login
+    if click.confirm("\nLogin to Codeforces now?", default=True):
+        username = click.prompt("Username")
+        password = click.prompt("Password", hide_input=True)
+        cfg.set("username", username)
+        cfg.save()
+
+        from cf.session import Session
+        session = Session()
+        try:
+            session.login(username, password)
+            console.print("[green]Login successful![/green]")
+        except Exception as e:
+            console.print(f"[red]Login failed: {e}[/red]")
+            console.print("[dim]You can try again later with 'cf config login'[/dim]")
+
+    cfg.save()
+    console.print("\n[green]Configuration saved![/green]")
+    console.print("[dim]Run 'cf config show' to view your settings[/dim]")
 
 
 @cli.command()
@@ -303,7 +439,8 @@ def submit(problem, lang):
 @cli.command()
 @click.argument("problem", nargs=-1)
 @click.option("--lang", "-l", default=None, help="Programming language")
-def gen(problem, lang):
+@click.option("--alias", "-a", default=None, help="Template alias (from 'cf config templates')")
+def gen(problem, lang, alias):
     """
     Generate code file from template.
 
@@ -311,7 +448,7 @@ def gen(problem, lang):
     Examples:
         cf gen              # auto-detect from current directory
         cf gen 1000A
-        cf gen 1000 A
+        cf gen 1000A --alias cpp17
     """
     from cf.template import generate_from_template
     from cf.config import Config
@@ -331,12 +468,21 @@ def gen(problem, lang):
             console.print("[red]Could not detect problem from current directory. Specify problem ID.[/red]")
             raise click.Abort()
 
+    cfg = Config()
+
+    if alias:
+        # Use specific named template
+        tmpl = cfg.get_template_by_alias(alias)
+        if not tmpl:
+            console.print(f"[red]Template alias '{alias}' not found. Run 'cf config templates' to see available templates.[/red]")
+            raise click.Abort()
+        lang = tmpl["lang"]
+
     if lang is None:
-        cfg = Config()
         lang = cfg.get("default_language", "cpp")
 
     try:
-        filepath = generate_from_template(contest_id, problem_id, lang)
+        filepath = generate_from_template(contest_id, problem_id, lang, alias)
         console.print(f"[green]Generated {filepath}[/green]")
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")

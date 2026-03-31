@@ -63,8 +63,7 @@ def submit_solution(
 
     session = Session()
     try:
-        if not session.is_authenticated():
-            raise AuthenticationError("Not authenticated. Please run 'cf config login' first.")
+        session.ensure_authenticated()
 
         csrf_token = session.get_csrf_token(submit_url)
 

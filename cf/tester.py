@@ -3,6 +3,7 @@ Testing module for running solutions against test cases.
 """
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -10,6 +11,16 @@ from cf.compiler import compile_source
 from cf.constants import TEST_INPUT_PATTERN, TEST_OUTPUT_PATTERN
 from cf.runner import run_code
 from cf.utils import detect_language, find_solution_file, normalize_whitespace
+
+
+def _run_script(script: str, cwd: Path) -> None:
+    """Run a shell script in the given directory. Raises on failure."""
+    if not script:
+        return
+    result = subprocess.run(script, shell=True, cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        error = result.stderr or result.stdout
+        raise RuntimeError(f"Script failed: {error.strip()}")
 
 
 def find_test_cases(directory: Path) -> List[int]:
@@ -90,6 +101,18 @@ def run_tests(solution_file: Optional[str] = None) -> List[Dict]:
     if not test_numbers:
         raise FileNotFoundError(f"No test cases found in {problem_dir}")
 
+    # Run before_script if configured
+    from cf.config import Config
+    cfg = Config()
+    before_script = cfg.get("before_script")
+    after_script = cfg.get("after_script")
+
+    if before_script:
+        try:
+            _run_script(before_script, problem_dir)
+        except RuntimeError as e:
+            return [_make_result(0, False, 0.0, error=f"Before script failed: {e}")]
+
     # Compile if needed
     executable = None
     if language in ["cpp", "c++", "c", "java"]:
@@ -138,5 +161,12 @@ def run_tests(solution_file: Optional[str] = None) -> List[Dict]:
 
         except Exception as e:
             results.append(_make_result(test_num, False, 0.0, error=str(e)))
+
+    # Run after_script if configured
+    if after_script:
+        try:
+            _run_script(after_script, problem_dir)
+        except RuntimeError:
+            pass  # Don't fail tests because of after_script
 
     return results

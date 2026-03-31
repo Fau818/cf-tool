@@ -11,7 +11,8 @@ from cf.utils import ensure_directory
 
 
 def generate_from_template(
-    contest_id: str, problem_id: str, language: str = "cpp"
+    contest_id: str, problem_id: str, language: str = "cpp",
+    alias: Optional[str] = None,
 ) -> Path:
     """
     Generate a code file from template.
@@ -20,6 +21,7 @@ def generate_from_template(
         contest_id: Contest ID
         problem_id: Problem ID
         language: Programming language
+        alias: Optional template alias to use
 
     Returns:
         Path to generated file
@@ -28,16 +30,35 @@ def generate_from_template(
         FileNotFoundError: If template not found
     """
     config = Config()
-    template_path = config.get_template_path(language)
+    template_path = None
+
+    if alias:
+        # Use specific named template
+        tmpl = config.get_template_by_alias(alias)
+        if tmpl:
+            path = Path(tmpl["path"]).expanduser()
+            if path.exists():
+                template_path = path
+            else:
+                raise FileNotFoundError(f"Template file not found: {tmpl['path']}")
+    else:
+        # Try named template system first (default for language)
+        tmpl = config.get_default_template(language)
+        if tmpl:
+            path = Path(tmpl["path"]).expanduser()
+            if path.exists():
+                template_path = path
+
+        # Fall back to legacy template path
+        if not template_path:
+            template_path = config.get_template_path(language)
 
     if not template_path or not template_path.exists():
         raise FileNotFoundError(f"Template for {language} not found")
 
-    # Read template
-    with open(template_path, 'r') as f:
-        template_content = f.read()
+    template_content = template_path.read_text()
 
-    # Simple variable substitution
+    # Variable substitution
     template_content = template_content.replace("$PROBLEM$", problem_id.upper())
     template_content = template_content.replace("$CONTEST$", contest_id)
 
@@ -49,8 +70,14 @@ def generate_from_template(
     solution_filename = SOLUTION_FILE_NAMES.get(language, f"solution.{language}")
     solution_file = problem_dir / solution_filename
 
-    # Write solution file
-    with open(solution_file, 'w') as f:
-        f.write(template_content)
+    # Handle filename collision with numeric suffix
+    if solution_file.exists():
+        base = solution_file.stem
+        ext = solution_file.suffix
+        counter = 1
+        while solution_file.exists():
+            solution_file = problem_dir / f"{base}{counter}{ext}"
+            counter += 1
 
+    solution_file.write_text(template_content)
     return solution_file

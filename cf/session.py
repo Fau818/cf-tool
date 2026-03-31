@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup
 from cf.constants import BASE_URL, LOGIN_URL, REQUEST_TIMEOUT
 from rich.console import Console
 
-from cf.utils import AuthenticationError, get_config_dir
+from cf.utils import AuthenticationError, NetworkError, get_config_dir
 
 console = Console()
 
@@ -293,10 +293,35 @@ class Session:
         except Exception:
             return False
 
+    def ensure_authenticated(self) -> None:
+        """
+        Ensure the session is authenticated, prompting for re-login if needed.
+
+        Raises:
+            AuthenticationError: If not authenticated and re-login is not possible
+        """
+        if self.is_authenticated():
+            return
+
+        # Try to load saved credentials and re-login
+        from cf.config import Config
+        cfg = Config()
+        username = cfg.get("username")
+
+        if not username:
+            raise AuthenticationError(
+                "Not authenticated. Please run 'cf config login' first."
+            )
+
+        console.print("[yellow]Session expired. Please re-login.[/yellow]")
+        import click
+        password = click.prompt("Password", hide_input=True)
+        self.login(username, password)
+
     def get_csrf_token(self, url: str) -> str:
         """Get CSRF token from a page."""
         try:
-            response = self.client.get(url)
+            response = self._request_with_retry("GET", url)
             response.raise_for_status()
 
             csrf_token = self.extract_csrf_token(response.text)
@@ -307,16 +332,39 @@ class Session:
             self.csrf_token = csrf_token
             return csrf_token
 
+        except AuthenticationError:
+            raise
         except Exception as e:
             raise AuthenticationError(f"Failed to get CSRF token: {e}")
 
+    def _request_with_retry(self, method: str, url: str, max_retries: int = 3, **kwargs):
+        """Make an HTTP request with retry logic for transient failures."""
+        import time as time_mod
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                if method.upper() == "GET":
+                    response = self.client.get(url, **kwargs)
+                else:
+                    response = self.client.post(url, **kwargs)
+                return response
+            except (ConnectionError, TimeoutError) as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    console.print(f"[yellow]Request failed, retrying in {wait}s...[/yellow]")
+                    time_mod.sleep(wait)
+
+        raise NetworkError(f"Request failed after {max_retries} attempts: {last_error}")
+
     def get(self, url: str, **kwargs):
-        """Make a GET request."""
-        return self.client.get(url, **kwargs)
+        """Make a GET request with retry."""
+        return self._request_with_retry("GET", url, **kwargs)
 
     def post(self, url: str, **kwargs):
-        """Make a POST request."""
-        return self.client.post(url, **kwargs)
+        """Make a POST request with retry."""
+        return self._request_with_retry("POST", url, **kwargs)
 
     def close(self) -> None:
         """Close the session."""
