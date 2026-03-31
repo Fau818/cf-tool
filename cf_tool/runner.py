@@ -6,7 +6,6 @@ import subprocess
 import sys
 import time as time_module
 from pathlib import Path
-from typing import List, Optional
 
 from cf_tool.config import Config
 
@@ -21,7 +20,7 @@ class ExecutionResult:
         returncode: int,
         time: float,
         timeout: bool = False,
-        error: Optional[str] = None,
+        error: str | None = None,
     ):
         self.stdout = stdout
         self.stderr = stderr
@@ -32,7 +31,7 @@ class ExecutionResult:
 
 
 def _run_process(
-    cmd: List[str], input_data: str, timeout: float, cwd: Path
+    cmd: list[str], input_data: str, timeout: float, cwd: Path
 ) -> ExecutionResult:
     """
     Run a process with the given command and input.
@@ -132,8 +131,8 @@ def run_code(
     source_file: Path,
     language: str,
     input_data: str,
-    executable: Optional[Path] = None,
-    timeout: Optional[float] = None,
+    executable: Path | None = None,
+    timeout: float | None = None,
 ) -> ExecutionResult:
     """
     Run code with input based on language.
@@ -150,7 +149,7 @@ def run_code(
     """
     if timeout is None:
         config = Config()
-        timeout = config.get("timeout", 2.0)
+        timeout = float(config.get("timeout", 2.0))
 
     if language in ["cpp", "c++", "c"]:
         if executable is None:

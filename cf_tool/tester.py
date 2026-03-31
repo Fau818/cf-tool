@@ -5,7 +5,6 @@ Testing module for running solutions against test cases.
 import re
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from cf_tool.compiler import compile_source
 from cf_tool.constants import TEST_INPUT_PATTERN, TEST_OUTPUT_PATTERN
@@ -23,7 +22,7 @@ def _run_script(script: str, cwd: Path) -> None:
         raise RuntimeError(f"Script failed: {error.strip()}")
 
 
-def find_test_cases(directory: Path) -> List[int]:
+def find_test_cases(directory: Path) -> list[int]:
     """
     Find all test case numbers in a directory.
 
@@ -48,12 +47,12 @@ def _make_result(
     test_num: int,
     passed: bool,
     time: float,
-    error: Optional[str] = None,
-    expected: Optional[str] = None,
-    actual: Optional[str] = None,
-) -> Dict:
+    error: str | None = None,
+    expected: str | None = None,
+    actual: str | None = None,
+) -> dict:
     """Create a test result dictionary."""
-    result = {"test_number": test_num, "passed": passed, "time": time}
+    result: dict = {"test_number": test_num, "passed": passed, "time": time}
     if error:
         result["error"] = error
     if expected is not None:
@@ -62,7 +61,7 @@ def _make_result(
     return result
 
 
-def run_tests(solution_file: Optional[str] = None) -> List[Dict]:
+def run_tests(solution_file: str | None = None) -> list[dict]:
     """
     Run solution against all test cases.
 

@@ -3,7 +3,6 @@ Template management for generating code files.
 """
 
 from pathlib import Path
-from typing import Optional
 
 from cf_tool.config import Config
 from cf_tool.constants import SOLUTION_FILE_NAMES
@@ -12,7 +11,7 @@ from cf_tool.utils import ensure_directory
 
 def generate_from_template(
     contest_id: str, problem_id: str, language: str = "cpp",
-    alias: Optional[str] = None,
+    alias: str | None = None,
 ) -> Path:
     """
     Generate a code file from template.

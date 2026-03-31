@@ -7,7 +7,7 @@ name = "cf-tool"
 version = "0.1.1"
 description = "Codeforces CLI tool for competitive programming"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 license = {text = "MIT"}
 authors = [
     {name = "cf-tool contributors"}
@@ -19,11 +19,7 @@ classifiers = [
     "Topic :: Software Development :: Testing",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 dependencies = [
@@ -44,6 +40,7 @@ dev = [
     "black>=23.0.0",
     "flake8>=6.0.0",
     "mypy>=1.4.0",
+    "basedpyright>=1.38.0",
 ]
 
 [project.scripts]
@@ -55,7 +52,7 @@ include = ["cf_tool*"]
 
 [tool.black]
 line-length = 100
-target-version = ["py38", "py39", "py310", "py311", "py312"]
+target-version = ["py313"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -63,7 +60,7 @@ python_files = "test_*.py"
 python_functions = "test_*"
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

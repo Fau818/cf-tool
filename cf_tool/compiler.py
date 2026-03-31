@@ -4,7 +4,6 @@ Code compilation module for C++ and other compiled languages.
 
 import subprocess
 from pathlib import Path
-from typing import List, Optional
 
 from cf_tool.config import Config
 from cf_tool.constants import DEFAULT_COMPILERS
@@ -12,7 +11,7 @@ from cf_tool.utils import CompilationError
 
 
 def _compile(
-    cmd: List[str],
+    cmd: list[str],
     source_file: Path,
     output_file: Path,
     use_shell: bool = False,
@@ -62,7 +61,7 @@ def _compile(
         raise CompilationError(f"Compilation error: {e}")
 
 
-def compile_cpp(source_file: Path, output_file: Optional[Path] = None) -> Path:
+def compile_cpp(source_file: Path, output_file: Path | None = None) -> Path:
     """
     Compile C++ source file.
 
@@ -97,7 +96,7 @@ def compile_cpp(source_file: Path, output_file: Optional[Path] = None) -> Path:
     return _compile([cmd], source_file, output_file, use_shell=True)
 
 
-def compile_source(source_file: Path, language: str) -> Optional[Path]:
+def compile_source(source_file: Path, language: str) -> Path | None:
     """
     Compile source file based on language.
 

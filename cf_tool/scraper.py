@@ -6,7 +6,6 @@ Uses cloudscraper to bypass Cloudflare protection.
 
 import re
 import sys
-from typing import Dict, List, Tuple
 
 import cloudscraper
 from bs4 import BeautifulSoup
@@ -37,7 +36,7 @@ class CodeforceScraper:
                 'desktop': True,
             }
         )
-        self.client.timeout = REQUEST_TIMEOUT
+        self.client.timeout = REQUEST_TIMEOUT  # type: ignore[reportAttributeAccessIssue]
 
     def _get_with_retry(self, url: str, max_retries: int = 3) -> str:
         """Fetch URL with retry logic for transient failures."""
@@ -88,7 +87,7 @@ class CodeforceScraper:
         url = pattern.format(cid=contest_id, pid=problem_id.upper())
         return self._get_with_retry(url)
 
-    def extract_test_cases(self, html: str) -> List[Tuple[str, str]]:
+    def extract_test_cases(self, html: str) -> list[tuple[str, str]]:
         """
         Extract sample test cases from problem HTML.
 
@@ -147,7 +146,7 @@ class CodeforceScraper:
 
         return pre_tag.get_text().strip()
 
-    def extract_problem_metadata(self, html: str) -> Dict[str, str]:
+    def extract_problem_metadata(self, html: str) -> dict[str, str]:
         """
         Extract problem metadata (title, time limit, memory limit, etc.).
 
@@ -201,7 +200,7 @@ class CodeforceScraper:
         except Exception as e:
             raise ParseError(f"Failed to parse metadata: {e}")
 
-    def fetch_contest_problems(self, contest_id: str, contest_type: str = "contest") -> List[Dict[str, str]]:
+    def fetch_contest_problems(self, contest_id: str, contest_type: str = "contest") -> list[dict[str, str]]:
         """
         Fetch the list of problems in a contest.
 
@@ -251,7 +250,7 @@ class CodeforceScraper:
 
     def get_problem_data(
         self, contest_id: str, problem_id: str, contest_type: str = "contest"
-    ) -> Dict:
+    ) -> dict:
         """
         Get complete problem data including test cases and metadata.
 

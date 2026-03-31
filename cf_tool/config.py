@@ -6,8 +6,6 @@ Manages ~/.cf/config file for storing user preferences.
 
 import json
 from pathlib import Path
-from typing import Any, Optional
-
 from cf_tool.constants import DEFAULT_CONFIG
 from cf_tool.utils import get_config_dir
 
@@ -58,7 +56,7 @@ class Config:
         except IOError as e:
             print(f"Error: Failed to save config file: {e}")
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default=None):
         """
         Get configuration value.
 
@@ -81,7 +79,7 @@ class Config:
 
         return value
 
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value) -> None:
         """
         Set configuration value.
 
@@ -103,7 +101,7 @@ class Config:
                 current = current[k]
             current[keys[-1]] = value
 
-    def get_template_path(self, language: str) -> Optional[Path]:
+    def get_template_path(self, language: str) -> Path | None:
         """
         Get template file path for a language.
 
@@ -124,16 +122,15 @@ class Config:
 
         # If path doesn't exist, check in package templates directory
         if not path.exists():
-            # Try package templates directory
-            import cf
-            package_dir = Path(cf.__file__).parent.parent
+            import cf_tool
+            package_dir = Path(cf_tool.__file__).parent.parent
             package_template = package_dir / "templates" / f"template.{language}"
             if package_template.exists():
                 return package_template
 
         return path if path.exists() else None
 
-    def get_compiler_command(self, language: str) -> Optional[str]:
+    def get_compiler_command(self, language: str) -> str | None:
         """
         Get compiler command for a language.
 
@@ -148,7 +145,7 @@ class Config:
 
     # --- Template management ---
 
-    def get_template_list(self) -> list:
+    def get_template_list(self) -> list[dict]:
         """Get list of named templates."""
         return self.data.get("template_list", [])
 
@@ -181,14 +178,14 @@ class Config:
         templates[:] = [t for t in templates if t.get("alias") != alias]
         return len(templates) < before
 
-    def get_template_by_alias(self, alias: str) -> Optional[dict]:
+    def get_template_by_alias(self, alias: str) -> dict | None:
         """Get a template entry by alias."""
         for t in self.data.get("template_list", []):
             if t.get("alias") == alias:
                 return t
         return None
 
-    def get_default_template(self, lang: str) -> Optional[dict]:
+    def get_default_template(self, lang: str) -> dict | None:
         """Get the default template for a language."""
         for t in self.data.get("template_list", []):
             if t.get("lang") == lang and t.get("default"):

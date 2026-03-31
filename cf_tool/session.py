@@ -10,7 +10,6 @@ import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import sys
 
@@ -40,8 +39,8 @@ class Session:
     def __init__(self):
         """Initialize session."""
         self.session_file = get_config_dir() / "session"
-        self.client = None
-        self.csrf_token = None
+        self.client: cloudscraper.CloudScraper = None  # type: ignore[reportAttributeAccessIssue]
+        self.csrf_token: str | None = None
         self._init_client()
 
     def _init_client(self):
@@ -54,7 +53,7 @@ class Session:
                 'desktop': True,
             }
         )
-        self.client.timeout = REQUEST_TIMEOUT
+        self.client.timeout = REQUEST_TIMEOUT  # type: ignore[reportAttributeAccessIssue]
         self.client.headers.update({
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
@@ -99,7 +98,7 @@ class Session:
         except (json.JSONDecodeError, IOError):
             return False
 
-    def save_session(self, username: str, cookies: dict) -> None:
+    def save_session(self, username: str, cookies: dict[str, str]) -> None:
         """
         Save session to file.
 
@@ -125,7 +124,7 @@ class Session:
         except IOError as e:
             console.print(f"[yellow]Warning: Failed to save session: {e}[/yellow]")
 
-    def extract_csrf_token(self, html: str) -> Optional[str]:
+    def extract_csrf_token(self, html: str) -> str | None:
         """Extract CSRF token from HTML."""
         # Method 1: data-csrf attribute
         match = re.search(r'data-csrf=[\'"]([a-f0-9]+)[\'"]', html)
@@ -141,11 +140,15 @@ class Session:
         soup = BeautifulSoup(html, 'lxml')
         elem = soup.find(attrs={'data-csrf': True})
         if elem:
-            return elem.get('data-csrf')
+            val = elem.get('data-csrf')
+            if isinstance(val, str):
+                return val
 
         csrf_input = soup.find('input', {'name': 'csrf_token'})
-        if csrf_input and csrf_input.get('value'):
-            return csrf_input['value']
+        if csrf_input:
+            val = csrf_input.get('value')
+            if isinstance(val, str):
+                return val
 
         return None
 

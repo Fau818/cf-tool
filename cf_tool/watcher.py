@@ -5,7 +5,6 @@ Polls submission status and displays real-time updates.
 """
 
 import time
-from typing import Dict, Optional
 
 import cloudscraper
 from rich.console import Console
@@ -62,14 +61,18 @@ VERDICT_DISPLAY = {
 }
 
 
+_api_client: cloudscraper.CloudScraper | None = None
+
+
 def _get_api_client() -> cloudscraper.CloudScraper:
     """Get a shared cloudscraper client for API calls."""
-    if not hasattr(_get_api_client, "_client"):
-        _get_api_client._client = cloudscraper.create_scraper()
-    return _get_api_client._client
+    global _api_client
+    if _api_client is None:
+        _api_client = cloudscraper.create_scraper()
+    return _api_client
 
 
-def get_submission_status(contest_id: str, submission_id: str) -> Optional[Dict]:
+def get_submission_status(contest_id: str, submission_id: str) -> dict | None:
     """
     Fetch submission status from Codeforces API.
 
@@ -106,7 +109,7 @@ def get_submission_status(contest_id: str, submission_id: str) -> Optional[Dict]
         return None
 
 
-def get_submission_by_handle(contest_id: str, handle: str, count: int = 10) -> Optional[Dict]:
+def get_submission_by_handle(contest_id: str, handle: str, count: int = 10) -> dict | None:
     """
     Get the most recent submission for a user in a contest.
 
@@ -142,7 +145,7 @@ def get_submission_by_handle(contest_id: str, handle: str, count: int = 10) -> O
         return None
 
 
-def format_submission_status(submission: Dict, contest_id: str, problem_id: str) -> Text:
+def format_submission_status(submission: dict, contest_id: str, problem_id: str) -> Text:
     """
     Format submission status for display.
 
@@ -230,7 +233,7 @@ def watch_submission(
     submission_id: str,
     timeout: float = 120.0,
     interval: float = 1.0,
-) -> Dict:
+) -> dict:
     """
     Watch submission status until final verdict.
 
@@ -272,7 +275,7 @@ def watch_submission(
     return last_status or {}
 
 
-def print_final_status(submission: Dict, contest_id: str, problem_id: str) -> None:
+def print_final_status(submission: dict, contest_id: str, problem_id: str) -> None:
     """
     Print final submission status (non-live version).
 

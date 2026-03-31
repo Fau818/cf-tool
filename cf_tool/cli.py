@@ -397,12 +397,14 @@ def submit(problem, lang):
         # Auto-detect from current directory
         ctx = detect_context_from_dir()
         if ctx and ctx[1]:
-            contest_id, problem_id = ctx
+            contest_id = ctx[0]
+            problem_id = ctx[1]
         else:
             console.print("[red]Could not detect problem from current directory. Specify problem ID.[/red]")
             raise click.Abort()
 
     # Auto-detect file if not provided
+    assert problem_id is not None
     if file is None:
         problem_dir = Path.cwd() / contest_id / problem_id
         if problem_dir.exists():
@@ -463,7 +465,8 @@ def gen(problem, lang, alias):
         from cf_tool.utils import detect_context_from_dir
         ctx = detect_context_from_dir()
         if ctx and ctx[1]:
-            contest_id, problem_id = ctx
+            contest_id = ctx[0]
+            problem_id = ctx[1]
         else:
             console.print("[red]Could not detect problem from current directory. Specify problem ID.[/red]")
             raise click.Abort()
@@ -481,6 +484,7 @@ def gen(problem, lang, alias):
     if lang is None:
         lang = cfg.get("default_language", "cpp")
 
+    assert problem_id is not None
     try:
         filepath = generate_from_template(contest_id, problem_id, lang, alias)
         console.print(f"[green]Generated {filepath}[/green]")

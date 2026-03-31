@@ -4,7 +4,6 @@ Problem parsing module - orchestrates downloading and setting up problems.
 
 import json
 from pathlib import Path
-from typing import Dict, List
 
 from cf_tool.config import Config
 from cf_tool.constants import PROBLEM_METADATA_FILE, SOLUTION_FILE_NAMES, TEST_INPUT_PATTERN, TEST_OUTPUT_PATTERN
@@ -14,7 +13,7 @@ from cf_tool.utils import ensure_directory
 
 def parse_problem(
     contest_id: str, problem_id: str, language: str = "cpp", contest_type: str = "contest"
-) -> Dict:
+) -> dict:
     """
     Parse a problem: download test cases and create directory structure.
 
@@ -91,7 +90,7 @@ def parse_problem(
 
 def parse_contest(
     contest_id: str, language: str = "cpp", contest_type: str = "contest"
-) -> List[Dict]:
+) -> list[dict]:
     """
     Parse all problems in a contest.
 

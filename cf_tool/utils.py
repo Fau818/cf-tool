@@ -2,9 +2,9 @@
 Utility functions for cf-tool.
 """
 
+import json
 import re
 from pathlib import Path
-from typing import Optional, Tuple
 
 
 class CFError(Exception):
@@ -55,7 +55,7 @@ def normalize_whitespace(text: str) -> str:
     return '\n'.join(lines)
 
 
-def find_solution_file(directory: Path, language: Optional[str] = None) -> Optional[Path]:
+def find_solution_file(directory: Path, language: str | None = None) -> Path | None:
     """
     Find solution file in directory.
 
@@ -93,7 +93,7 @@ def find_solution_file(directory: Path, language: Optional[str] = None) -> Optio
     return None
 
 
-def detect_language(filepath: Path) -> Optional[str]:
+def detect_language(filepath: Path) -> str | None:
     """
     Detect programming language from file extension.
 
@@ -122,7 +122,7 @@ def get_config_dir() -> Path:
     return config_dir
 
 
-def parse_problem_url(url: str) -> Optional[Tuple[str, str, str]]:
+def parse_problem_url(url: str) -> tuple[str, str, str] | None:
     """
     Parse Codeforces problem URL.
 
@@ -153,7 +153,7 @@ def parse_problem_url(url: str) -> Optional[Tuple[str, str, str]]:
     return None
 
 
-def detect_context_from_dir(directory: Optional[Path] = None) -> Optional[Tuple[str, Optional[str]]]:
+def detect_context_from_dir(directory: Path | None = None) -> tuple[str, str | None] | None:
     """
     Detect contest_id and problem_id from directory structure.
 
@@ -175,7 +175,6 @@ def detect_context_from_dir(directory: Optional[Path] = None) -> Optional[Tuple[
     metadata_file = directory / "problem.json"
     if metadata_file.exists():
         try:
-            import json
             data = json.loads(metadata_file.read_text())
             cid = data.get("contest_id")
             pid = data.get("problem_id")

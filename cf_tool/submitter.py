@@ -4,7 +4,6 @@ Solution submission module for Codeforces.
 
 import re
 from pathlib import Path
-from typing import Dict, Optional
 
 from bs4 import BeautifulSoup
 
@@ -17,9 +16,9 @@ def submit_solution(
     contest_id: str,
     problem_id: str,
     file_path: str,
-    language: Optional[str] = None,
+    language: str | None = None,
     contest_type: str = "contest",
-) -> Dict:
+) -> dict:
     """
     Submit a solution to Codeforces.
 
@@ -113,7 +112,7 @@ def submit_solution(
         error_messages = []
 
         # Check for error spans with text content (e.g. "for__source" errors)
-        for err in soup.find_all('span', class_=lambda c: c and 'error' in c):
+        for err in soup.find_all('span', class_=lambda c: bool(c and 'error' in c)):
             text = err.get_text(strip=True)
             if text:
                 error_messages.append(text)
@@ -172,7 +171,9 @@ def _extract_submission_id(html: str) -> str:
     # Try data-submission-id attribute
     submission_row = soup.find('tr', {'data-submission-id': True})
     if submission_row:
-        return submission_row.get('data-submission-id')
+        val = submission_row.get('data-submission-id')
+        if isinstance(val, str):
+            return val
 
     # Fallback: regex search
     match = re.search(r'submission/(\d+)', html)
