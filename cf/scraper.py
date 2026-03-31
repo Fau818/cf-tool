@@ -5,6 +5,7 @@ Uses cloudscraper to bypass Cloudflare protection.
 """
 
 import re
+import sys
 from typing import Dict, List, Tuple
 
 import cloudscraper
@@ -12,6 +13,15 @@ from bs4 import BeautifulSoup
 
 from cf.constants import REQUEST_TIMEOUT, URL_PATTERNS
 from cf.utils import NetworkError, ParseError
+
+
+def _get_platform() -> str:
+    """Detect platform for cloudscraper browser config."""
+    if sys.platform == "darwin":
+        return "darwin"
+    elif sys.platform == "win32":
+        return "windows"
+    return "linux"
 
 
 class CodeforceScraper:
@@ -23,7 +33,7 @@ class CodeforceScraper:
         self.client = cloudscraper.create_scraper(
             browser={
                 'browser': 'chrome',
-                'platform': 'darwin',  # macOS
+                'platform': _get_platform(),
                 'desktop': True,
             }
         )

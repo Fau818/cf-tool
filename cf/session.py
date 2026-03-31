@@ -12,11 +12,26 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import sys
+
 import cloudscraper
 from bs4 import BeautifulSoup
 
 from cf.constants import BASE_URL, LOGIN_URL, REQUEST_TIMEOUT
+from rich.console import Console
+
 from cf.utils import AuthenticationError, get_config_dir
+
+console = Console()
+
+
+def _get_platform() -> str:
+    """Detect platform for cloudscraper browser config."""
+    if sys.platform == "darwin":
+        return "darwin"
+    elif sys.platform == "win32":
+        return "windows"
+    return "linux"
 
 
 class Session:
@@ -35,7 +50,7 @@ class Session:
         self.client = cloudscraper.create_scraper(
             browser={
                 'browser': 'chrome',
-                'platform': 'darwin',
+                'platform': _get_platform(),
                 'desktop': True,
             }
         )
@@ -108,7 +123,7 @@ class Session:
             self.session_file.chmod(0o600)
 
         except IOError as e:
-            print(f"Warning: Failed to save session: {e}")
+            console.print(f"[yellow]Warning: Failed to save session: {e}[/yellow]")
 
     def extract_csrf_token(self, html: str) -> Optional[str]:
         """Extract CSRF token from HTML."""
@@ -154,8 +169,8 @@ class Session:
                 "DrissionPage is required for login. Install it with: pip install DrissionPage"
             )
 
-        print("Opening browser for Codeforces login...")
-        print("(This is needed to bypass Cloudflare protection)")
+        console.print("[cyan]Opening browser for Codeforces login...[/cyan]")
+        console.print("[dim](This is needed to bypass Cloudflare protection)[/dim]")
 
         page = None
         try:
@@ -197,7 +212,7 @@ class Session:
                 self._fill_login_form(page, username, password)
 
                 # Wait for login to complete
-                print("Logging in...")
+                console.print("[cyan]Logging in...[/cyan]")
                 time.sleep(3)
 
                 # Check if login succeeded (should redirect away from /enter)
@@ -214,7 +229,7 @@ class Session:
                         error_msg = error_elem.text or error_msg
                     raise AuthenticationError(error_msg)
             else:
-                print("Already logged in, extracting session...")
+                console.print("[green]Already logged in, extracting session...[/green]")
 
             # Extract cookies from browser
             cookies = {cookie['name']: cookie['value'] for cookie in page.cookies()}
@@ -229,7 +244,7 @@ class Session:
             for name, value in cookies.items():
                 self.client.cookies.set(name, value)
 
-            print("Login successful!")
+            console.print("[green]Login successful![/green]")
 
         except AuthenticationError:
             raise

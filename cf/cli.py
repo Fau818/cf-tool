@@ -3,7 +3,6 @@ CLI interface for cf-tool using Click.
 """
 
 import re
-from typing import Tuple
 
 import click
 from rich.console import Console
@@ -13,7 +12,7 @@ from cf import __version__
 console = Console()
 
 
-def parse_problem_id(args: Tuple[str, ...]) -> Tuple[str, str]:
+def parse_problem_id(args: tuple[str, ...]) -> tuple[str, str]:
     """
     Parse contest_id and problem_id from arguments.
 
@@ -265,7 +264,7 @@ def submit(problem, lang):
         with console.status("[bold green]Submitting solution..."):
             result = submit_solution(contest_id, problem_id, file, lang)
 
-        console.print(f"[green]Submitted[/green]")
+        console.print("[green]Submitted[/green]")
         console.print()
 
         # Watch submission status
@@ -311,7 +310,10 @@ def gen(problem, lang):
 
 @cli.command("open")
 @click.argument("problem", nargs=-1, required=True)
-def open_problem(problem):
+@click.option("--contest-type", "-t", default="contest",
+              type=click.Choice(["contest", "gym", "problemset", "group"]),
+              help="Contest type")
+def open_problem(problem, contest_type):
     """
     Open problem in web browser.
 
@@ -329,7 +331,7 @@ def open_problem(problem):
         console.print(f"[red]Error: {e}[/red]")
         raise click.Abort()
 
-    url = URL_PATTERNS['contest'].format(cid=contest_id, pid=problem_id)
+    url = URL_PATTERNS[contest_type].format(cid=contest_id, pid=problem_id)
     webbrowser.open(url)
     console.print(f"[green]Opened {url}[/green]")
 

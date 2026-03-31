@@ -116,9 +116,7 @@ def get_config_dir() -> Path:
     Returns:
         Path to config directory (~/.cf/)
     """
-    import platformdirs
-
-    # Use ~/.cf/ for simplicity (cf-tool original location)
+    # Use ~/.cf/ for compatibility with original cf-tool
     config_dir = Path.home() / ".cf"
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir

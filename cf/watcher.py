@@ -62,6 +62,13 @@ VERDICT_DISPLAY = {
 }
 
 
+def _get_api_client() -> cloudscraper.CloudScraper:
+    """Get a shared cloudscraper client for API calls."""
+    if not hasattr(_get_api_client, "_client"):
+        _get_api_client._client = cloudscraper.create_scraper()
+    return _get_api_client._client
+
+
 def get_submission_status(contest_id: str, submission_id: str) -> Optional[Dict]:
     """
     Fetch submission status from Codeforces API.
@@ -74,14 +81,13 @@ def get_submission_status(contest_id: str, submission_id: str) -> Optional[Dict]
         Submission data dict or None if not found
     """
     try:
-        client = cloudscraper.create_scraper()
+        client = _get_api_client()
 
-        # Use Codeforces API to get submission status
         api_url = f"{BASE_URL}/api/contest.status"
         params = {
             "contestId": contest_id,
             "from": 1,
-            "count": 50,  # Get recent submissions to find ours
+            "count": 50,
         }
 
         response = client.get(api_url, params=params)
@@ -90,13 +96,10 @@ def get_submission_status(contest_id: str, submission_id: str) -> Optional[Dict]
         if data.get("status") != "OK":
             return None
 
-        # Find our submission
         for submission in data.get("result", []):
             if str(submission.get("id")) == str(submission_id):
                 return submission
 
-        # If not found in first batch, try searching by handle if we have one
-        # For newly submitted, it should be in the first batch
         return None
 
     except Exception:
@@ -116,7 +119,7 @@ def get_submission_by_handle(contest_id: str, handle: str, count: int = 10) -> O
         Most recent submission or None
     """
     try:
-        client = cloudscraper.create_scraper()
+        client = _get_api_client()
 
         api_url = f"{BASE_URL}/api/contest.status"
         params = {

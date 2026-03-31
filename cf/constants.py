@@ -102,7 +102,7 @@ SOLUTION_FILE_NAMES = {
 PROBLEM_METADATA_FILE = "problem.json"
 
 # User agent for HTTP requests
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 # Request timeout
 REQUEST_TIMEOUT = 30.0  # seconds
