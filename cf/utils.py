@@ -153,6 +153,56 @@ def parse_problem_url(url: str) -> Optional[Tuple[str, str, str]]:
     return None
 
 
+def detect_context_from_dir(directory: Optional[Path] = None) -> Optional[Tuple[str, Optional[str]]]:
+    """
+    Detect contest_id and problem_id from directory structure.
+
+    Looks for problem.json in the current or parent directories to determine
+    the contest/problem context. Supports these directory layouts:
+      - Inside problem dir: {contest_id}/{problem_id}/ -> (contest_id, problem_id)
+      - Inside contest dir: {contest_id}/ -> (contest_id, None)
+
+    Args:
+        directory: Directory to check (defaults to CWD)
+
+    Returns:
+        Tuple of (contest_id, problem_id) or (contest_id, None) or None
+    """
+    if directory is None:
+        directory = Path.cwd()
+
+    # Check if we're in a problem directory (has problem.json)
+    metadata_file = directory / "problem.json"
+    if metadata_file.exists():
+        try:
+            import json
+            data = json.loads(metadata_file.read_text())
+            cid = data.get("contest_id")
+            pid = data.get("problem_id")
+            if cid:
+                return (str(cid), pid)
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # Check directory name pattern: parent is contest_id (digits), current is problem_id (letter)
+    dir_name = directory.name
+    parent_name = directory.parent.name
+
+    if parent_name.isdigit() and re.match(r'^[A-Za-z]\d*$', dir_name):
+        return (parent_name, dir_name.upper())
+
+    # Check if we're in a contest directory (has subdirs that look like problems)
+    if dir_name.isdigit():
+        has_problems = any(
+            d.is_dir() and re.match(r'^[A-Za-z]\d*$', d.name)
+            for d in directory.iterdir()
+        )
+        if has_problems:
+            return (dir_name, None)
+
+    return None
+
+
 def ensure_directory(path: Path) -> Path:
     """
     Ensure directory exists, create if not.

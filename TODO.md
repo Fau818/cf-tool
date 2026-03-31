@@ -57,20 +57,20 @@ Feature comparison between the original Go-based [cf-tool](https://github.com/xa
 - [x] Confirmation prompt before submission
 - [x] Auto-watch submission after submit
 
-### [~] `watch` - Watch Submissions
+### [x] `watch` - Watch Submissions
 
 - [x] Poll submission status via Codeforces API
 - [x] Real-time status display with Rich
 - [x] Color-coded verdicts (AC, WA, TLE, etc.)
-- [ ] Watch recent N submissions without specifying submission ID
-- [ ] `--all` flag to watch all submissions
+- [x] Watch latest submission without specifying ID: `cf watch 1000`
+- [x] `--all` flag to list recent submissions
 
-### [~] `open` - Open in Browser
+### [x] `open` - Open in Browser
 
 - [x] Open problem page in browser
 - [x] Support contest/gym/problemset/group types via `--contest-type`
-- [ ] Open contest page (not just single problem)
-- [ ] Auto-detect contest/problem from current directory
+- [x] Open contest page when in contest directory
+- [x] Auto-detect contest/problem from current directory
 
 ### [x] `race` - Join Contest
 
@@ -116,10 +116,10 @@ Feature comparison between the original Go-based [cf-tool](https://github.com/xa
 
 ## Cross-Cutting Features
 
-### [ ] Directory Context Detection
+### [x] Directory Context Detection
 
-- [ ] Auto-detect contest_id/problem_id from current working directory
-- [ ] Allow running `cf test`, `cf submit`, etc. without explicit problem ID when inside a problem directory
+- [x] Auto-detect contest_id/problem_id from current working directory
+- [x] Allow running `cf submit`, `cf open`, `cf gen` without explicit problem ID when inside a problem directory
 
 ### [ ] Enhanced Template System
 

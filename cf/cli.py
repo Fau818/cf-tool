@@ -226,7 +226,7 @@ def test(file):
 
 
 @cli.command()
-@click.argument("problem", nargs=-1, required=True)
+@click.argument("problem", nargs=-1)
 @click.option("--lang", "-l", default=None, help="Programming language")
 def submit(problem, lang):
     """
@@ -234,17 +234,16 @@ def submit(problem, lang):
 
     \b
     Examples:
+        cf submit                   # auto-detect from current directory
         cf submit 1000A
         cf submit 1000 A
         cf submit 1000A solution.cpp
-        cf submit 1000 A solution.cpp
     """
     from cf.submitter import submit_solution
-    from cf.utils import find_solution_file
+    from cf.utils import find_solution_file, detect_context_from_dir
     from cf.watcher import watch_submission
     from pathlib import Path
 
-    # Parse arguments: can be (problem,) or (problem, file) or (contest, problem) or (contest, problem, file)
     args = list(problem)
     file = None
 
@@ -252,11 +251,20 @@ def submit(problem, lang):
     if len(args) >= 2 and '.' in args[-1]:
         file = args.pop()
 
-    try:
-        contest_id, problem_id = parse_problem_id(tuple(args))
-    except click.BadParameter as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise click.Abort()
+    if args:
+        try:
+            contest_id, problem_id = parse_problem_id(tuple(args))
+        except click.BadParameter as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise click.Abort()
+    else:
+        # Auto-detect from current directory
+        ctx = detect_context_from_dir()
+        if ctx and ctx[1]:
+            contest_id, problem_id = ctx
+        else:
+            console.print("[red]Could not detect problem from current directory. Specify problem ID.[/red]")
+            raise click.Abort()
 
     # Auto-detect file if not provided
     if file is None:
@@ -266,7 +274,6 @@ def submit(problem, lang):
             if detected:
                 file = str(detected)
         if file is None:
-            # Try current directory
             detected = find_solution_file(Path.cwd())
             if detected:
                 file = str(detected)
@@ -286,7 +293,6 @@ def submit(problem, lang):
         console.print("[green]Submitted[/green]")
         console.print()
 
-        # Watch submission status
         watch_submission(contest_id, problem_id, result['submission_id'])
 
     except Exception as e:
@@ -295,7 +301,7 @@ def submit(problem, lang):
 
 
 @cli.command()
-@click.argument("problem", nargs=-1, required=True)
+@click.argument("problem", nargs=-1)
 @click.option("--lang", "-l", default=None, help="Programming language")
 def gen(problem, lang):
     """
@@ -303,17 +309,27 @@ def gen(problem, lang):
 
     \b
     Examples:
+        cf gen              # auto-detect from current directory
         cf gen 1000A
         cf gen 1000 A
     """
     from cf.template import generate_from_template
     from cf.config import Config
 
-    try:
-        contest_id, problem_id = parse_problem_id(problem)
-    except click.BadParameter as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise click.Abort()
+    if problem:
+        try:
+            contest_id, problem_id = parse_problem_id(problem)
+        except click.BadParameter as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise click.Abort()
+    else:
+        from cf.utils import detect_context_from_dir
+        ctx = detect_context_from_dir()
+        if ctx and ctx[1]:
+            contest_id, problem_id = ctx
+        else:
+            console.print("[red]Could not detect problem from current directory. Specify problem ID.[/red]")
+            raise click.Abort()
 
     if lang is None:
         cfg = Config()
@@ -328,7 +344,7 @@ def gen(problem, lang):
 
 
 @cli.command("open")
-@click.argument("problem", nargs=-1, required=True)
+@click.argument("problem", nargs=-1)
 @click.option("--contest-type", "-t", default="contest",
               type=click.Choice(["contest", "gym", "problemset", "group"]),
               help="Contest type")
@@ -338,17 +354,33 @@ def open_problem(problem, contest_type):
 
     \b
     Examples:
+        cf open              # auto-detect from current directory
         cf open 1000A
         cf open 1000 A
     """
     import webbrowser
     from cf.constants import URL_PATTERNS
 
-    try:
-        contest_id, problem_id = parse_problem_id(problem)
-    except click.BadParameter as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise click.Abort()
+    if problem:
+        try:
+            contest_id, problem_id = parse_problem_id(problem)
+        except click.BadParameter as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise click.Abort()
+    else:
+        from cf.utils import detect_context_from_dir
+        ctx = detect_context_from_dir()
+        if ctx and ctx[1]:
+            contest_id, problem_id = ctx
+        elif ctx:
+            # In contest dir, open contest page
+            url = f"https://codeforces.com/contest/{ctx[0]}"
+            webbrowser.open(url)
+            console.print(f"[green]Opened {url}[/green]")
+            return
+        else:
+            console.print("[red]Could not detect problem from current directory. Specify problem ID.[/red]")
+            raise click.Abort()
 
     url = URL_PATTERNS[contest_type].format(cid=contest_id, pid=problem_id)
     webbrowser.open(url)
@@ -357,29 +389,95 @@ def open_problem(problem, contest_type):
 
 @cli.command()
 @click.argument("contest_id")
-@click.argument("submission_id")
-def watch(contest_id, submission_id):
+@click.argument("submission_id", required=False)
+@click.option("--all", "-a", "watch_all", is_flag=True, help="Show all recent submissions")
+def watch(contest_id, submission_id, watch_all):
     """
     Watch submission status.
 
     \b
     Examples:
-        cf watch 1000 12345678
+        cf watch 1000 12345678   # watch specific submission
+        cf watch 1000            # watch your latest submission in contest
+        cf watch 1000 --all      # list recent submissions
     """
-    from cf.watcher import watch_submission, get_submission_status
+    from cf.watcher import watch_submission, get_submission_status, get_submission_by_handle
 
-    # Try to get problem_id from submission
-    submission = get_submission_status(contest_id, submission_id)
-    if submission:
-        problem = submission.get("problem", {})
-        problem_id = problem.get("index", "?")
-    else:
+    if submission_id:
+        # Watch specific submission
+        submission = get_submission_status(contest_id, submission_id)
         problem_id = "?"
+        if submission:
+            problem_id = submission.get("problem", {}).get("index", "?")
 
-    console.print(f"[cyan]Watching submission {submission_id}...[/cyan]")
-    console.print()
+        console.print(f"[cyan]Watching submission {submission_id}...[/cyan]")
+        console.print()
+        watch_submission(contest_id, problem_id, submission_id)
+    else:
+        # Find latest submission by current user
+        from cf.config import Config
+        cfg = Config()
+        handle = cfg.get("username")
+        if not handle:
+            console.print("[red]No username configured. Run 'cf config login' first.[/red]")
+            raise click.Abort()
 
-    watch_submission(contest_id, problem_id, submission_id)
+        if watch_all:
+            # Show recent submissions as a table
+            from cf.watcher import _get_api_client
+            from rich.table import Table
+            try:
+                client = _get_api_client()
+                api_url = f"https://codeforces.com/api/contest.status"
+                params = {"contestId": contest_id, "handle": handle, "from": 1, "count": 10}
+                resp = client.get(api_url, params=params)
+                data = resp.json()
+                if data.get("status") != "OK":
+                    console.print(f"[red]API error: {data.get('comment', 'unknown')}[/red]")
+                    raise click.Abort()
+
+                subs = data.get("result", [])
+                if not subs:
+                    console.print("[yellow]No submissions found[/yellow]")
+                    return
+
+                import time
+                table = Table(title=f"Recent submissions in contest {contest_id}")
+                table.add_column("ID", style="cyan")
+                table.add_column("Problem", style="white")
+                table.add_column("Verdict", style="bold")
+                table.add_column("Time", style="magenta")
+                table.add_column("When", style="dim")
+
+                from cf.watcher import VERDICT_DISPLAY
+                for s in subs:
+                    sid = str(s.get("id", ""))
+                    prob = s.get("problem", {})
+                    pidx = prob.get("index", "?")
+                    verdict = s.get("verdict", "TESTING")
+                    display_name, color = VERDICT_DISPLAY.get(verdict, (verdict, "white"))
+                    time_ms = f"{s.get('timeConsumedMillis', 0)} ms"
+                    when = time.strftime("%H:%M:%S", time.localtime(s.get("creationTimeSeconds", 0)))
+                    table.add_row(sid, pidx, f"[{color}]{display_name}[/{color}]", time_ms, when)
+
+                console.print(table)
+            except click.Abort:
+                raise
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                raise click.Abort()
+        else:
+            # Watch latest submission
+            submission = get_submission_by_handle(contest_id, handle)
+            if not submission:
+                console.print(f"[yellow]No submissions found for {handle} in contest {contest_id}[/yellow]")
+                return
+
+            sub_id = str(submission.get("id", ""))
+            problem_id = submission.get("problem", {}).get("index", "?")
+            console.print(f"[cyan]Watching latest submission {sub_id}...[/cyan]")
+            console.print()
+            watch_submission(contest_id, problem_id, sub_id)
 
 
 @cli.command("list")
