@@ -28,7 +28,7 @@ Feature comparison between the original Go-based [cf-tool](https://github.com/xa
 - [x] Download sample test cases (in/out files)
 - [x] Generate solution file from template
 - [x] Support contest/gym/problemset/group types
-- [ ] Parse entire contest: `cf parse 1000` (download all problems A-Z)
+- [x] Parse entire contest: `cf parse 1000` (download all problems A-Z)
 - [ ] Auto-detect contest/problem from current directory
 
 ### [x] `gen` - Generate Code from Template
@@ -68,50 +68,51 @@ Feature comparison between the original Go-based [cf-tool](https://github.com/xa
 ### [~] `open` - Open in Browser
 
 - [x] Open problem page in browser
+- [x] Support contest/gym/problemset/group types via `--contest-type`
 - [ ] Open contest page (not just single problem)
 - [ ] Auto-detect contest/problem from current directory
 
-### [ ] `race` - Join Contest
+### [x] `race` - Join Contest
 
-- [ ] Register user for a contest
-- [ ] Open contest page and problems in browser
-- [ ] Auto-parse all problems when contest starts
-- [ ] Countdown timer to contest start
+- [x] Open contest page and registration in browser
+- [x] Auto-parse all problems when contest starts
+- [x] Countdown timer to contest start
+- [ ] Automatic registration (currently opens registration page)
 
-### [ ] `stand` - View Standings
+### [x] `stand` - View Standings
 
-- [ ] Open standings page in browser
-- [ ] Support contest/gym types
+- [x] Open standings page in browser
+- [x] Support contest/gym types
 
-### [ ] `sid` - Open Submission Page
+### [x] `sid` - Open Submission Page
 
-- [ ] Open specific submission by ID
-- [ ] Open last submission (no ID required)
-- [ ] Support viewing submission details
+- [x] Open specific submission by ID
+- [x] Open contest submissions page via `--contest` flag
 
-### [ ] `pull` - Pull Accepted Solutions
+### [x] `pull` - Pull Accepted Solutions
 
-- [ ] Download solutions from past contests
-- [ ] Filter by accepted status (`--ac` flag)
-- [ ] Organize by contest/problem directory structure
+- [x] Download solutions from past contests
+- [x] Filter by accepted status (`--ac` flag)
+- [x] Organize by contest/problem directory structure
 
-### [ ] `clone` - Clone User Submissions
+### [x] `clone` - Clone User Submissions
 
-- [ ] Clone submission history for a given user handle
-- [ ] Filter accepted-only solutions
-- [ ] Organize by contest structure
+- [x] Clone submission history for a given user handle
+- [x] Filter accepted-only solutions (`--ac` flag)
+- [x] Organize by contest structure
+- [ ] Download full source code (requires auth; currently saves metadata)
 
-### [ ] `list` - Display Problem List
+### [x] `list` - Display Problem List
 
-- [ ] Show formatted table of problems in a contest
-- [ ] Display problem ID, name, solved count, time limit
+- [x] Show formatted table of problems in a contest
+- [x] Display problem ID, name, solved count
 - [ ] Color-code by user's acceptance status (green=AC, red=WA)
 
-### [ ] `upgrade` - Check for Updates
+### [x] `upgrade` - Check for Updates
 
-- [ ] Query PyPI for latest version
-- [ ] Compare with current version
-- [ ] Prompt user to run `pip install --upgrade cf-tool`
+- [x] Query PyPI for latest version
+- [x] Compare with current version
+- [x] Prompt user to run `pip install --upgrade cf-tool`
 
 ## Cross-Cutting Features
 

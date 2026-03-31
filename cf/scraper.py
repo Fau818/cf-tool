@@ -186,6 +186,58 @@ class CodeforceScraper:
         except Exception as e:
             raise ParseError(f"Failed to parse metadata: {e}")
 
+    def fetch_contest_problems(self, contest_id: str, contest_type: str = "contest") -> List[Dict[str, str]]:
+        """
+        Fetch the list of problems in a contest.
+
+        Args:
+            contest_id: Contest ID
+            contest_type: Type of contest (contest, gym)
+
+        Returns:
+            List of dicts with 'id' and 'name' keys
+
+        Raises:
+            NetworkError, ParseError: If fetching or parsing fails
+        """
+        if contest_type == "gym":
+            url = f"https://codeforces.com/gym/{contest_id}"
+        else:
+            url = f"https://codeforces.com/contest/{contest_id}"
+
+        try:
+            response = self.client.get(url)
+            response.raise_for_status()
+        except Exception as e:
+            raise NetworkError(f"Failed to fetch contest page: {e}")
+
+        try:
+            soup = BeautifulSoup(response.text, 'lxml')
+            problems = []
+
+            table = soup.find('table', class_='problems')
+            if not table:
+                raise ParseError("Could not find problems table on contest page")
+
+            for row in table.find_all('tr')[1:]:  # skip header row
+                cells = row.find_all('td')
+                if len(cells) >= 2:
+                    pid = cells[0].get_text().strip()
+                    name = cells[1].find('a')
+                    name_text = name.get_text().strip() if name else ""
+                    if pid:
+                        problems.append({"id": pid, "name": name_text})
+
+            if not problems:
+                raise ParseError("No problems found in contest")
+
+            return problems
+
+        except ParseError:
+            raise
+        except Exception as e:
+            raise ParseError(f"Failed to parse contest problems: {e}")
+
     def get_problem_data(
         self, contest_id: str, problem_id: str, contest_type: str = "contest"
     ) -> Dict:

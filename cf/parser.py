@@ -4,7 +4,7 @@ Problem parsing module - orchestrates downloading and setting up problems.
 
 import json
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 from cf.config import Config
 from cf.constants import PROBLEM_METADATA_FILE, SOLUTION_FILE_NAMES, TEST_INPUT_PATTERN, TEST_OUTPUT_PATTERN
@@ -87,6 +87,31 @@ def parse_problem(
         "solution_file": str(solution_file),
         "metadata": metadata,
     }
+
+
+def parse_contest(
+    contest_id: str, language: str = "cpp", contest_type: str = "contest"
+) -> List[Dict]:
+    """
+    Parse all problems in a contest.
+
+    Args:
+        contest_id: Contest ID
+        language: Programming language for solution files
+        contest_type: Type of contest (contest, gym)
+
+    Returns:
+        List of parse result dicts for each problem
+    """
+    scraper = CodeforceScraper()
+    problems = scraper.fetch_contest_problems(contest_id, contest_type)
+
+    results = []
+    for prob in problems:
+        result = parse_problem(contest_id, prob["id"], language, contest_type)
+        results.append(result)
+
+    return results
 
 
 # Default solution templates for when no custom template exists
