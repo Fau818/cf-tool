@@ -8,7 +8,7 @@ import time as time_module
 from pathlib import Path
 from typing import List, Optional
 
-from cf.config import Config
+from cf_tool.config import Config
 
 
 class ExecutionResult:

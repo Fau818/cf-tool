@@ -6,9 +6,9 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from cf.config import Config
-from cf.constants import DEFAULT_COMPILERS
-from cf.utils import CompilationError
+from cf_tool.config import Config
+from cf_tool.constants import DEFAULT_COMPILERS
+from cf_tool.utils import CompilationError
 
 
 def _compile(

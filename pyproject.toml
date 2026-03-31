@@ -7,7 +7,7 @@ name = "cf-tool"
 version = "0.1.1"
 description = "Codeforces CLI tool for competitive programming"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "cf-tool contributors"}
@@ -47,11 +47,11 @@ dev = [
 ]
 
 [project.scripts]
-cf = "cf.cli:main"
+cf = "cf_tool.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["cf*"]
+include = ["cf_tool*"]
 
 [tool.black]
 line-length = 100

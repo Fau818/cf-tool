@@ -13,7 +13,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-from cf.constants import BASE_URL
+from cf_tool.constants import BASE_URL
 
 console = Console()
 
