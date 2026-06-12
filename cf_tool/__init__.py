@@ -1,5 +1,3 @@
-"""
-cf-tool: A Codeforces CLI tool for competitive programming.
-"""
+"""cf-tool: Codeforces CLI, a Python port of xalanq/cf-tool."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"

@@ -1,197 +1,100 @@
-"""
-Configuration management for cf-tool.
+"""Config management at ~/.cf/config, mirroring xalanq/cf-tool's config package.
 
-Manages ~/.cf/config file for storing user preferences.
+The JSON schema (keys, defaults) is kept identical to the Go tool so behavior
+documented in its README applies here unchanged.
 """
+
+from __future__ import annotations
 
 import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from cf_tool.constants import DEFAULT_CONFIG
-from cf_tool.utils import get_config_dir
+
+PROBLEM_TYPES = ("contest", "gym", "group", "acmsguru")
+
+CF_DIR = Path.home() / ".cf"
+CONFIG_PATH = CF_DIR / "config"
+SESSION_PATH = CF_DIR / "session"
+
+DEFAULT_HOST = "https://codeforces.com"
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge two dictionaries, with override taking precedence."""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
+@dataclass
+class CodeTemplate:
+    """One code template. Scripts run in sequence on `cf test`:
+    before_script once, script per sample, after_script once."""
+
+    alias: str = ""
+    lang: str = ""  # Codeforces programTypeId, e.g. "54"
+    path: str = ""  # template source file
+    suffix: list[str] = field(default_factory=list)  # file extensions, e.g. ["cpp", "cc"]
+    before_script: str = ""
+    script: str = ""
+    after_script: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CodeTemplate":
+        known = {f for f in cls.__dataclass_fields__}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
+@dataclass
 class Config:
-    """Configuration manager for cf-tool."""
+    template: list[CodeTemplate] = field(default_factory=list)
+    default: int = 0  # index into template
+    gen_after_parse: bool = False
+    host: str = DEFAULT_HOST
+    proxy: str = ""
+    folder_name: dict[str, str] = field(default_factory=dict)
 
-    def __init__(self):
-        """Initialize configuration."""
-        self.config_dir = get_config_dir()
-        self.config_file = self.config_dir / "config"
-        self.data = self.load()
+    def __post_init__(self) -> None:
+        self._path = CONFIG_PATH
+        self._normalize()
 
-    def load(self) -> dict:
-        """
-        Load configuration from file.
+    def _normalize(self) -> None:
+        if not 0 <= self.default < max(len(self.template), 1):
+            self.default = 0
+        self.folder_name.setdefault("root", "cf")
+        for problem_type in PROBLEM_TYPES:
+            self.folder_name.setdefault(problem_type, problem_type)
 
-        Returns:
-            Configuration dictionary
-        """
-        if not self.config_file.exists():
-            return DEFAULT_CONFIG.copy()
-
+    @classmethod
+    def load(cls, path: Path = CONFIG_PATH) -> "Config":
         try:
-            loaded_config = json.loads(self.config_file.read_text())
-            # Deep merge with defaults (in case new keys were added)
-            return _deep_merge(DEFAULT_CONFIG, loaded_config)
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"Warning: Failed to load config file: {e}")
-            return DEFAULT_CONFIG.copy()
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        cfg = cls(
+            template=[CodeTemplate.from_dict(t) for t in data.get("template", [])],
+            default=data.get("default", 0),
+            gen_after_parse=data.get("gen_after_parse", False),
+            host=data.get("host", DEFAULT_HOST),
+            proxy=data.get("proxy", ""),
+            folder_name=dict(data.get("folder_name", {})),
+        )
+        cfg._path = Path(path)
+        return cfg
 
     def save(self) -> None:
-        """Save configuration to file."""
-        try:
-            self.config_dir.mkdir(parents=True, exist_ok=True)
-            self.config_file.write_text(json.dumps(self.data, indent=2))
-        except IOError as e:
-            print(f"Error: Failed to save config file: {e}")
+        self._normalize()
+        data = {
+            "template": [asdict(t) for t in self.template],
+            "default": self.default,
+            "gen_after_parse": self.gen_after_parse,
+            "host": self.host,
+            "proxy": self.proxy,
+            "folder_name": self.folder_name,
+        }
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
 
-    def get(self, key: str, default=None):
-        """
-        Get configuration value.
+    def templates_by_alias(self, alias: str) -> list[CodeTemplate]:
+        return [t for t in self.template if t.alias == alias]
 
-        Args:
-            key: Configuration key (supports dot notation like "compiler.cpp")
-            default: Default value if key not found
-
-        Returns:
-            Configuration value or default
-        """
-        # Support dot notation for nested keys
-        keys = key.split('.')
-        value = self.data
-
-        for k in keys:
-            if isinstance(value, dict) and k in value:
-                value = value[k]
-            else:
-                return default
-
-        return value
-
-    def set(self, key: str, value) -> None:
-        """
-        Set configuration value.
-
-        Args:
-            key: Configuration key (supports dot notation like "compiler.cpp")
-            value: Value to set
-        """
-        # Support dot notation for nested keys
-        keys = key.split('.')
-
-        if len(keys) == 1:
-            self.data[key] = value
-        else:
-            # Navigate to the parent dict and set the value
-            current = self.data
-            for k in keys[:-1]:
-                if k not in current or not isinstance(current[k], dict):
-                    current[k] = {}
-                current = current[k]
-            current[keys[-1]] = value
-
-    def get_template_path(self, language: str) -> Path | None:
-        """
-        Get template file path for a language.
-
-        Args:
-            language: Programming language
-
-        Returns:
-            Path to template file or None
-        """
-        templates = self.data.get("templates", {})
-        template_path = templates.get(language)
-
-        if not template_path:
+    @property
+    def default_template(self) -> CodeTemplate | None:
+        if not self.template:
             return None
-
-        # Expand ~ to home directory
-        path = Path(template_path).expanduser()
-
-        # If path doesn't exist, check in package templates directory
-        if not path.exists():
-            import cf_tool
-            package_dir = Path(cf_tool.__file__).parent.parent
-            package_template = package_dir / "templates" / f"template.{language}"
-            if package_template.exists():
-                return package_template
-
-        return path if path.exists() else None
-
-    def get_compiler_command(self, language: str) -> str | None:
-        """
-        Get compiler command for a language.
-
-        Args:
-            language: Programming language
-
-        Returns:
-            Compiler command or None
-        """
-        compilers = self.data.get("compiler", {})
-        return compilers.get(language)
-
-    # --- Template management ---
-
-    def get_template_list(self) -> list[dict]:
-        """Get list of named templates."""
-        return self.data.get("template_list", [])
-
-    def add_template(self, alias: str, lang: str, path: str, default: bool = False) -> None:
-        """Add a named template."""
-        templates = self.data.setdefault("template_list", [])
-
-        # Remove existing with same alias
-        templates[:] = [t for t in templates if t.get("alias") != alias]
-
-        if default:
-            for t in templates:
-                if t.get("lang") == lang:
-                    t["default"] = False
-
-        templates.append({
-            "alias": alias,
-            "lang": lang,
-            "path": path,
-            "default": default,
-        })
-
-        # Also update legacy format for backward compatibility
-        self.data.setdefault("templates", {})[lang] = path
-
-    def remove_template(self, alias: str) -> bool:
-        """Remove a named template by alias. Returns True if found."""
-        templates = self.data.get("template_list", [])
-        before = len(templates)
-        templates[:] = [t for t in templates if t.get("alias") != alias]
-        return len(templates) < before
-
-    def get_template_by_alias(self, alias: str) -> dict | None:
-        """Get a template entry by alias."""
-        for t in self.data.get("template_list", []):
-            if t.get("alias") == alias:
-                return t
-        return None
-
-    def get_default_template(self, lang: str) -> dict | None:
-        """Get the default template for a language."""
-        for t in self.data.get("template_list", []):
-            if t.get("lang") == lang and t.get("default"):
-                return t
-        # Fallback: first template for this language
-        for t in self.data.get("template_list", []):
-            if t.get("lang") == lang:
-                return t
-        return None
+        return self.template[self.default]

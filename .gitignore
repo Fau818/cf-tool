@@ -56,3 +56,6 @@ dmypy.json
 
 # Local config (for testing)
 .cf/
+
+# Reference copy of original Go cf-tool sources (xalanq/cf-tool)
+.go_ref/

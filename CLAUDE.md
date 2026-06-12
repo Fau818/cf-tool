@@ -4,97 +4,72 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-cf-tool is a Python CLI for competitive programming on Codeforces. It's a rewrite of the original Go-based [cf-tool](https://github.com/xalanq/cf-tool).
+cf-tool is a Python CLI for competitive programming on Codeforces — a faithful port of the
+Go-based [xalanq/cf-tool](https://github.com/xalanq/cf-tool). Fidelity to the original's UX
+is a design goal: directory layout, specifier/path inference rules, template scripts, and
+file naming (`in{i}.txt` / `ans{i}.txt`) all match the Go tool. When changing behavior,
+check the Go originals first (reference copies in `.go_ref/`, gitignored).
+
+- Distribution name: `cf-tool` (PyPI), package: `cf_tool`, CLI command: `cf`
 
 ## Development Setup
 
 ```bash
-# Environment managed with uv
 uv venv && uv pip install ".[dev]"
-source .venv/bin/activate
 
-# Non-editable install (rebuild after code changes)
-uv pip install .
+uv pip install .   # NON-editable install: rebuild after code changes
 
-# Run tests
-pytest
-
-# Format code
-black cf_tool/
-
-# Lint
-flake8 cf_tool/
-
-# Type check
-mypy cf_tool/
+pytest             # offline unit tests (live tests are opt-in: pytest -m live)
+black cf_tool/ tests/
+flake8 --max-line-length=100 --extend-ignore=E203,W503 cf_tool/
 ```
-
-## Project Structure
-
-```
-cf_tool/                  # Project root (Git repo)
-├── cf_tool/              # Python package (flat layout)
-│   ├── __init__.py
-│   ├── cli.py            # Click-based CLI entry point
-│   ├── session.py        # Auth & HTTP session management
-│   ├── scraper.py        # Codeforces page scraper
-│   ├── parser.py         # Problem download orchestrator
-│   ├── submitter.py      # Solution submission
-│   ├── watcher.py        # Submission status polling
-│   ├── tester.py         # Local test runner
-│   ├── compiler.py       # C++/C/Java compilation
-│   ├── runner.py         # Solution execution
-│   ├── template.py       # Template generation
-│   ├── config.py         # JSON config management
-│   ├── constants.py      # URLs, language IDs, defaults
-│   └── utils.py          # Exceptions, helpers
-├── tests/
-├── pyproject.toml
-└── .venv/
-```
-
-- Distribution name: `cf-tool` (PyPI)
-- Package name: `cf_tool` (`import cf_tool`)
-- CLI command: `cf`
 
 ## Architecture
 
-### Module Overview
-
-- **cli.py** - Click-based CLI entry point. All commands defined here route to other modules.
-- **session.py** - Authentication using DrissionPage (browser automation) for Cloudflare Turnstile bypass, then cloudscraper for subsequent HTTP requests. Sessions stored in `~/.cf/session`.
-- **scraper.py** - BeautifulSoup-based parsing of Codeforces problem pages via cloudscraper.
-- **parser.py** - Orchestrates problem downloading: creates directory structure (`contest_id/problem_id/`), saves test cases (`in1.txt`, `out1.txt`), generates solution files from templates.
-- **tester.py** - Runs solutions against test cases. Handles compilation, execution, output comparison with whitespace normalization.
-- **compiler.py** - Compiles C++/C/Java. Uses config-defined or default compiler commands.
-- **runner.py** - Executes solutions with stdin/stdout handling, timeout enforcement. `ExecutionResult` class holds output, timing, error state.
-- **submitter.py** - Posts solutions to Codeforces, extracts CSRF tokens, parses submission results.
-- **watcher.py** - Polls Codeforces API for submission status, real-time display with Rich Live.
-- **template.py** - Named template system with alias selection and variable substitution.
-- **config.py** - JSON config management at `~/.cf/config`. Supports dot notation for nested keys.
-- **constants.py** - URLs, language IDs for submission, file patterns, default compiler commands.
-- **utils.py** - Custom exceptions (`CFError` hierarchy), file detection, whitespace normalization, directory context detection.
-
-### Key Patterns
-
-- **Cloudflare bypass**: Login uses DrissionPage (real Chrome browser) to handle Turnstile. Subsequent requests use cloudscraper with saved cookies.
-- **Test case flow**: `in{n}.txt` / `out{n}.txt` pattern. Output comparison normalizes trailing whitespace.
-- **Language detection**: Based on file extension via `EXTENSION_TO_LANGUAGE` mapping.
-- **Configuration**: Stored in `~/.cf/config` as JSON. Templates support `$PROBLEM$` and `$CONTEST$` variables.
-- **Directory context**: `detect_context_from_dir()` in utils.py infers contest/problem from CWD.
-- **Error handling**: Exponential backoff retry for network requests. Auto re-login prompt on session expiry.
-
-### Directory Structure Created by Parse
-
 ```
-{contest_id}/
-└── {problem_id}/
-    ├── in1.txt, out1.txt, ...  # Test cases
-    ├── solution.cpp            # Generated from template
-    └── problem.json            # Metadata
+cf_tool/
+├── cli.py        # Click commands; each body is thin (resolve Info -> one call)
+├── args.py       # parse_args(): specifier/path -> Info (port of cmd/args.go).
+│                 #   Explicit args win; cwd fills blanks; >=6-digit id => gym;
+│                 #   acmsguru rewrites contest->99999. Info builds all URLs/paths.
+├── config.py     # ~/.cf/config JSON (same schema as Go: template/default/
+│                 #   gen_after_parse/host/proxy/folder_name)
+├── client.py     # session state (~/.cf/session) + every network op:
+│                 #   login tiers, parse, statis, race, submit, watch, pull, clone
+├── http.py       # curl_cffi Transport (Chrome TLS impersonation), retry,
+│                 #   Cloudflare challenge detection -> CloudflareChallengeError
+├── browser.py    # DrissionPage: solve challenges / login past Turnstile
+│                 #   (headless first, visible last); exports cookies+UA
+├── crypto.py     # AES-GCM password obfuscation, byte-compatible with Go tool
+├── pages.py      # ALL HTML/JSON parsing (regex + bs4): handle, csrf, samples,
+│                 #   problems table, languages select, submissions, countdown
+├── templates.py  # placeholder substitution, code-file detection (by template
+│                 #   suffix, interactive pick on ambiguity), cf gen
+├── judge.py      # cf test: before_script/script/after_script, in/ans pairs,
+│                 #   per-line-trim comparison, time+peak-RSS display
+├── langs.py      # static language-id fallback (live list parsed from submit page)
+├── ui.py         # Rich console + choose_index/yes_or_no prompts
+└── errors.py     # CFError hierarchy
 ```
 
-## Language IDs for Submission
+### Key invariants
 
-When modifying submission logic, use IDs from `constants.py`:
-- cpp: 89 (G++23), python: 31 (Python 3.8), java: 87 (Java 21)
+- **Login tiers** (client.py `login()`): 0 cookies still valid → 1 plain HTTP POST
+  /enter (ftaa/bfaa flow) → 2 headless browser → 3 visible browser. Any page fetched
+  via `_authed_body()` auto-relogins once when the handle marker is missing.
+- **cf_clearance is bound to the User-Agent**: cookies exported from the browser must
+  travel together with its UA (`_adopt_browser_session`). Never set one without the other.
+- **Directory model**: `<root>/<type folder>/<contestID>/<problemID>/`, root folder
+  name configurable (default `cf`). If no root is found among cwd ancestors, commands
+  create `./cf/...` under cwd (Go behavior).
+- **No hardcoded compilers**: test/submit are language-agnostic through template
+  suffix matching and the three scripts. Don't add per-language logic.
+- **Parsing stays in pages.py** with fixture-style unit tests in tests/test_pages.py —
+  when Codeforces markup changes, fix it there only.
+
+## Testing against real Codeforces
+
+Unit tests are offline. For live verification use old practice problems (e.g.
+problemset 4A / contest 1136), throttle polling to >=1s, and vary submitted source
+(timestamp comment) to dodge the duplicate-submission rejection. Never automate
+against a rated running contest.

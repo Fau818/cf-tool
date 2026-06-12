@@ -1,6 +1,4 @@
-"""
-Entry point for running cf as a module: python -m cf
-"""
+"""Entry point for running as a module: python -m cf_tool"""
 
 from cf_tool.cli import main
 
