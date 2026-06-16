@@ -106,16 +106,16 @@ def get_one_code(
         raise CFError("Cannot find any code.\nMaybe you should add a new template by `cf config`")
     chosen = codes[0]
     if len(codes) > 1:
-        ui.cyan("There are multiple files can be selected.")
-        for i, code in enumerate(codes):
-            ui.plain(f"{i:3}: {code.name}")
-        chosen = codes[ui.choose_index(len(codes))]
+        chosen = ui.select(
+            "Multiple files match. Which one?",
+            [(code.name, code) for code in codes],
+        )
     index = chosen.indexes[0]
     if len(chosen.indexes) > 1:
-        ui.cyan("There are multiple languages match the file.")
-        for i, idx in enumerate(chosen.indexes):
-            ui.plain(f"{i:3}: {langs.name_of(templates[idx].lang, langs_table)}")
-        index = chosen.indexes[ui.choose_index(len(chosen.indexes))]
+        index = ui.select(
+            "Multiple languages match this file. Which one?",
+            [(langs.name_of(templates[idx].lang, langs_table), idx) for idx in chosen.indexes],
+        )
     return chosen.name, index
 
 
@@ -126,10 +126,10 @@ def template_path_for_alias(cfg: Config, alias: str) -> str:
         raise CFError(f"Cannot find any template with alias {alias}")
     if len(matching) == 1:
         return matching[0].path
-    ui.plain(f"There are multiple templates with alias {alias}")
-    for i, template in enumerate(matching):
-        ui.plain(f'{i:3}: "{template.path}"')
-    return matching[ui.choose_index(len(matching))].path
+    return ui.select(
+        f'Multiple templates with alias "{alias}". Which one?',
+        [(template.path, template.path) for template in matching],
+    )
 
 
 def generate_file(source: str, current_path: Path, ext: str) -> Path:

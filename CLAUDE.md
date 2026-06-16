@@ -48,7 +48,8 @@ cf_tool/
 ├── judge.py      # cf test: before_script/script/after_script, in/ans pairs,
 │                 #   per-line-trim comparison, time+peak-RSS display
 ├── langs.py      # static language-id fallback (live list parsed from submit page)
-├── ui.py         # Rich console + choose_index/yes_or_no prompts
+├── ui.py         # Rich console output + questionary prompts (select/text/
+│                 #   path/confirm) with a plain typed-input fallback for no-TTY
 └── errors.py     # CFError hierarchy
 ```
 

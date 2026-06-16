@@ -15,6 +15,9 @@ handling today's Cloudflare-protected Codeforces.
   re-login silently.
 - **Language-agnostic testing** via template scripts (`before_script` / `script` /
   `after_script`) — no hardcoded compilers.
+- **Interactive prompts**: `cf config` and the file/template pickers use arrow-key
+  menus with type-to-filter (e.g. filtering the language list); piped/non-TTY use
+  falls back to plain numbered input.
 
 ## Install
 
@@ -29,7 +32,7 @@ requires a real browser).
 ## Quick start
 
 ```bash
-cf config          # 0) login   1) add a template (alias, suffixes, scripts)
+cf config          # arrow-key menu: login, add a template (alias, suffixes, scripts), ...
 cf race 1136       # countdown -> opens pages -> parses samples into ~/cf/contest/1136/
 cd ~/cf/contest/1136/a
 cf gen             # instantiate your default template as a.cpp

@@ -70,13 +70,33 @@ def main() -> None:
 # ------------------------------------------------------------------- config
 
 
+_TEMPLATE_PLACEHOLDERS = """\
+You can insert placeholders into your template code; "cf gen" replaces them:
+
+  $%U%$   Handle (e.g. xalanq)        $%h%$   Hour   (e.g. 08)
+  $%Y%$   Year   (e.g. 2019)         $%m%$   Minute (e.g. 05)
+  $%M%$   Month  (e.g. 04)           $%s%$   Second (e.g. 00)
+  $%D%$   Day    (e.g. 09)"""
+
+_SCRIPT_PLACEHOLDERS = """\
+Template runs 3 scripts in sequence on "cf test":
+    before_script   (once)   script   (once per sample)   after_script   (once)
+  Leave before/after empty to skip. Run your program in "script" with plain
+  stdin/stdout. Script placeholders:
+
+  $%path%$   Dir of source file (e.g. "/home/xalanq/")
+  $%full%$   Full source name   (e.g. "a.cpp")
+  $%file%$   Source name, no suffix (e.g. "a")
+  $%rand%$   Random 8-char string (a-z 0-9)"""
+
+
 def _config_login(client: Client) -> None:
     if client.handle:
         ui.green(f"Current user: {client.handle}")
-    ui.cyan("Configure handle/email and password")
-    ui.cyan("Note: The password is invisible, just type it correctly.")
-    print("handle/email: ", end="", flush=True)
-    handle_or_email = ui.scanline().strip()
+    handle_or_email = ui.text(
+        "Handle or email:", validate=lambda s: bool(s.strip()) or "Can not be empty"
+    )
+    ui.cyan("The password is invisible, just type it correctly.")
     password = getpass.getpass("password: ")
     client.config_login(handle_or_email, password)
 
@@ -84,161 +104,136 @@ def _config_login(client: Client) -> None:
 def _config_add_template(cfg: Config, client: Client) -> None:
     ui.cyan("Add a template")
     languages = client.languages()
-    ui.cyan("Language list:")
-    for lang_id, name in sorted(languages.items(), key=lambda kv: kv[1]):
-        ui.plain(f"{lang_id:>5}: {name}")
-    ui.cyan('Select a language (e.g. "89"): ')
-    while True:
-        lang = ui.scanline().strip()
-        if lang in languages:
-            ui.green(languages[lang])
-            break
-        ui.red("Invalid index. Please input again")
+    lang = ui.select(
+        "Language (type to filter):",
+        [
+            (f"{lid:>3}  {name}", lid)
+            for lid, name in sorted(languages.items(), key=lambda kv: kv[1])
+        ],
+        search=True,
+    )
+    ui.green(f"{lang}  {languages.get(lang, '')}")
 
-    ui.plain("""Template:
-  You can insert some placeholders into your template code. When generate a code from the
-  template, cf will replace all placeholders by following rules:
+    ui.plain(_TEMPLATE_PLACEHOLDERS)
+    path = ui.path(
+        "Template file (e.g. ~/template/io.cpp):",
+        validate=lambda s: Path(s.strip()).expanduser().is_file() or "Not an existing file",
+    )
+    path = str(Path(path).expanduser())
 
-  $%U%$   Handle (e.g. xalanq)
-  $%Y%$   Year   (e.g. 2019)
-  $%M%$   Month  (e.g. 04)
-  $%D%$   Day    (e.g. 09)
-  $%h%$   Hour   (e.g. 08)
-  $%m%$   Minute (e.g. 05)
-  $%s%$   Second (e.g. 00)""")
-    ui.cyan('Template absolute path(e.g. "~/template/io.cpp"): ')
-    while True:
-        path = ui.scanline().strip()
-        expanded = Path(path).expanduser()
-        if expanded.is_file():
-            path = str(expanded)
-            break
-        ui.red(f"{path} is invalid. Please input again: ")
-
-    ui.cyan("The suffix of template above will be added by default.")
-    ui.cyan('Other suffix? (e.g. "cxx cc"), empty is ok: ')
-    suffixes = ui.scanline().split()
-    suffixes.append(Path(path).suffix.lstrip("."))
+    ui.cyan("The template's own suffix is added automatically.")
+    extra = ui.text('Other suffixes? (e.g. "cxx cc"), empty is ok:')
+    suffixes = [*extra.split(), Path(path).suffix.lstrip(".")]
     suffix = list(dict.fromkeys(s for s in suffixes if s))
 
-    ui.cyan('Template\'s alias (e.g. "cpp" "py"): ')
-    while True:
-        alias = ui.scanline().strip()
-        if alias:
-            break
-        ui.red("Alias can not be empty. Please input again: ")
+    alias = ui.text(
+        'Alias (e.g. "cpp" "py"):',
+        validate=lambda s: bool(s.strip()) or "Alias can not be empty",
+        allow_empty=False,
+    )
 
-    ui.green("Script in template:")
-    ui.plain("""Template will run 3 scripts in sequence when you run "cf test":
-    - before_script   (execute once)
-    - script          (execute the number of samples times)
-    - after_script    (execute once)
-  You could set "before_script" or "after_script" to empty string, meaning not executing.
-  You have to run your program in "script" with standard input/output (no need to redirect).
-
-  You can insert some placeholders in your scripts. When execute a script,
-  cf will replace all placeholders by following rules:
-
-  $%path%$   Path to source file (Excluding $%full%$, e.g. "/home/xalanq/")
-  $%full%$   Full name of source file (e.g. "a.cpp")
-  $%file%$   Name of source file (Excluding suffix, e.g. "a")
-  $%rand%$   Random string with 8 character (including "a-z" "0-9")""")
-    ui.cyan('Before script (e.g. "g++ $%full%$ -o $%file%$.exe -std=c++11"), empty is ok: ')
-    before_script = ui.scanline().strip()
-    ui.cyan('Script (e.g. "./$%file%$.exe" "python3 $%full%$"): ')
-    while True:
-        script = ui.scanline().strip()
-        if script:
-            break
-        ui.red("Script can not be empty. Please input again: ")
-    ui.cyan('After script (e.g. "rm $%file%$.exe"), empty is ok: ')
-    after_script = ui.scanline().strip()
+    ui.green("Scripts:")
+    ui.plain(_SCRIPT_PLACEHOLDERS)
+    before_script = ui.text('Before script (e.g. "g++ $%full%$ -o $%file%$"), empty is ok:')
+    script = ui.text(
+        'Script (e.g. "./$%file%$" "python3 $%full%$"):',
+        validate=lambda s: bool(s.strip()) or "Script can not be empty",
+        allow_empty=False,
+    )
+    after_script = ui.text('After script (e.g. "rm $%file%$"), empty is ok:')
 
     cfg.template.append(
         CodeTemplate(alias, lang, path, suffix, before_script, script, after_script)
     )
-    if ui.yes_or_no("Make it default (y/n)? "):
+    if not cfg.template[:-1] or ui.confirm("Make it the default template?", default=True):
         cfg.default = len(cfg.template) - 1
     cfg.save()
+    ui.green(f'Added template "{alias}".')
 
 
-def _list_templates(cfg: Config) -> None:
-    for i, template in enumerate(cfg.template):
-        star = "[green]*[/green]" if i == cfg.default else " "
-        ui.console.print(f'{star}{i:2}: "{template.alias}" "{template.path}"')
+def _template_label(cfg: Config, i: int) -> str:
+    template = cfg.template[i]
+    star = "* " if i == cfg.default else "  "
+    return f"{star}{template.alias}  ({template.path})"
+
+
+def _pick_template(cfg: Config, message: str) -> int | None:
+    if not cfg.template:
+        ui.red("There is no template. Please add one")
+        return None
+    return ui.select(
+        message,
+        [(_template_label(cfg, i), i) for i in range(len(cfg.template))],
+        default=cfg.default,
+    )
 
 
 def _config_remove_template(cfg: Config) -> None:
-    ui.cyan("Remove a template")
-    if not cfg.template:
-        ui.red("There is no template. Please add one")
+    idx = _pick_template(cfg, "Delete which template?")
+    if idx is None:
         return
-    _list_templates(cfg)
-    idx = ui.choose_index(len(cfg.template))
-    cfg.template.pop(idx)
+    removed = cfg.template.pop(idx)
     if idx == cfg.default:
         cfg.default = 0
     elif idx < cfg.default:
         cfg.default -= 1
     cfg.save()
+    ui.green(f'Removed template "{removed.alias}".')
 
 
 def _config_set_default(cfg: Config) -> None:
-    ui.cyan("Set default template")
-    if not cfg.template:
-        ui.red("There is no template. Please add one")
+    idx = _pick_template(cfg, "Set which template as default?")
+    if idx is None:
         return
-    _list_templates(cfg)
-    cfg.default = ui.choose_index(len(cfg.template))
+    cfg.default = idx
     cfg.save()
+    ui.green(f'Default is now "{cfg.template[idx].alias}".')
 
 
 def _config_host(cfg: Config) -> None:
-    ui.green(f"Current host domain is {cfg.host}")
-    ui.cyan('Set a new host domain (e.g. "https://codeforces.com")')
-    ui.cyan('Note: Don\'t forget the "http://" or "https://"')
     host_re = re.compile(r"https?://[\w\-]+(\.[\w\-]+)+/?")
-    while True:
-        host = ui.scanline().strip()
-        if host_re.match(host):
-            break
-        ui.red(f'Invalid host "{host}"')
+    host = ui.text(
+        "Host domain (include http:// or https://):",
+        default=cfg.host,
+        validate=lambda s: bool(host_re.match(s.strip())) or "Invalid host",
+        allow_empty=False,
+    )
     cfg.host = host.rstrip("/")
-    ui.green(f"New host domain is {cfg.host}")
     cfg.save()
+    ui.green(f"New host domain is {cfg.host}")
 
 
 def _config_proxy(cfg: Config) -> None:
-    if cfg.proxy:
-        ui.green(f"Current proxy is {cfg.proxy}")
-    else:
-        ui.green("Current proxy is based on environment")
-    ui.cyan('Set a new proxy (e.g. "http://127.0.0.1:2333", "socks5://127.0.0.1:1080")')
-    ui.cyan("Enter empty line if you want to use default proxy from environment")
     proxy_re = re.compile(r"[\w\-]+?://[\w\-]+(\.[\w\-]+)*(:\d+)?")
-    while True:
-        proxy = ui.scanline().strip()
-        if not proxy or proxy_re.match(proxy):
-            break
-        ui.red(f'Invalid proxy "{proxy}"')
+    ui.cyan("Empty line uses the proxy from the environment.")
+    proxy = ui.text(
+        'Proxy (e.g. "http://127.0.0.1:2333", "socks5://127.0.0.1:1080"):',
+        default=cfg.proxy,
+        validate=lambda s: (not s.strip()) or bool(proxy_re.match(s.strip())) or "Invalid proxy",
+    )
     cfg.proxy = proxy
-    if proxy:
-        ui.green(f"Current proxy is {proxy}")
-    else:
-        ui.green("Current proxy is based on environment")
     cfg.save()
+    ui.green(f"Current proxy is {proxy}" if proxy else "Current proxy is based on environment")
 
 
 def _config_folders(cfg: Config) -> None:
-    ui.cyan("Set folders' name")
-    ui.cyan("Enter empty line if you don't want to change the value")
-    ui.green(f"Root path (current: {cfg.folder_name['root']})")
-    if value := ui.scanline().strip():
-        cfg.folder_name["root"] = value
+    ui.cyan("Empty line keeps the current value.")
+    cfg.folder_name["root"] = (
+        ui.text("Root folder:", default=cfg.folder_name["root"]) or cfg.folder_name["root"]
+    )
     for problem_type in PROBLEM_TYPES:
-        ui.green(f"{problem_type} path (current: {cfg.folder_name[problem_type]})")
-        if value := ui.scanline().strip():
-            cfg.folder_name[problem_type] = value
+        current = cfg.folder_name[problem_type]
+        cfg.folder_name[problem_type] = (
+            ui.text(f"{problem_type} folder:", default=current) or current
+        )
+    cfg.save()
+    ui.green("Saved folder names.")
+
+
+def _config_toggle_gen(cfg: Config) -> None:
+    cfg.gen_after_parse = ui.confirm(
+        'Run "cf gen" automatically after "cf parse"?', default=cfg.gen_after_parse
+    )
     cfg.save()
 
 
@@ -247,33 +242,34 @@ def _config_folders(cfg: Config) -> None:
 def config() -> None:
     """Configure handle, password, templates, host and folders."""
     cfg, client = _setup()
-    ui.cyan("Configure the tool")
-    ui.plain("0) login")
-    ui.plain("1) add a template")
-    ui.plain("2) delete a template")
-    ui.plain("3) set default template")
-    ui.plain('4) run "cf gen" after "cf parse"')
-    ui.plain("5) set host domain")
-    ui.plain("6) set proxy")
-    ui.plain("7) set folders' name")
-    index = ui.choose_index(8)
-    if index == 0:
-        _config_login(client)
-    elif index == 1:
-        _config_add_template(cfg, client)
-    elif index == 2:
-        _config_remove_template(cfg)
-    elif index == 3:
-        _config_set_default(cfg)
-    elif index == 4:
-        cfg.gen_after_parse = ui.yes_or_no('Run "cf gen" after "cf parse" (y/n)? ')
-        cfg.save()
-    elif index == 5:
-        _config_host(cfg)
-    elif index == 6:
-        _config_proxy(cfg)
-    elif index == 7:
-        _config_folders(cfg)
+    while True:
+        gen_state = "on" if cfg.gen_after_parse else "off"
+        action = ui.select(
+            "Configure cf-tool:",
+            [
+                ("Login", "login"),
+                ("Add a template", "add"),
+                ("Delete a template", "delete"),
+                ("Set default template", "default"),
+                (f'Toggle "gen after parse"  [{gen_state}]', "gen"),
+                ("Set host domain", "host"),
+                ("Set proxy", "proxy"),
+                ("Set folders' name", "folders"),
+                ("Done", "done"),
+            ],
+        )
+        if action == "done":
+            break
+        {
+            "login": lambda: _config_login(client),
+            "add": lambda: _config_add_template(cfg, client),
+            "delete": lambda: _config_remove_template(cfg),
+            "default": lambda: _config_set_default(cfg),
+            "gen": lambda: _config_toggle_gen(cfg),
+            "host": lambda: _config_host(cfg),
+            "proxy": lambda: _config_proxy(cfg),
+            "folders": lambda: _config_folders(cfg),
+        }[action]()
 
 
 # ----------------------------------------------------------------- commands
