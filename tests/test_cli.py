@@ -12,17 +12,21 @@ from cf_tool.cli import main
 
 @pytest.fixture
 def isolated_home(tmp_path, monkeypatch):
-    """Point ~ (and so ~/.cf) at a temp dir; reload config paths."""
+    """Point the XDG config/state paths (and the legacy ~/.cf) at a temp dir."""
     monkeypatch.setenv("HOME", str(tmp_path))
     import cf_tool.config as config_module
 
-    monkeypatch.setattr(config_module, "CF_DIR", tmp_path / ".cf")
-    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / ".cf" / "config")
-    monkeypatch.setattr(config_module, "SESSION_PATH", tmp_path / ".cf" / "session")
+    config_dir = tmp_path / ".config" / "cf"
+    state_dir = tmp_path / ".local" / "state" / "cf"
+    monkeypatch.setattr(config_module, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_module, "STATE_DIR", state_dir)
+    monkeypatch.setattr(config_module, "CONFIG_PATH", config_dir / "config")
+    monkeypatch.setattr(config_module, "SESSION_PATH", state_dir / "session")
+    monkeypatch.setattr(config_module, "LEGACY_DIR", tmp_path / ".cf")
     import cf_tool.cli as cli_module
     import cf_tool.client as client_module
 
-    monkeypatch.setattr(client_module, "SESSION_PATH", tmp_path / ".cf" / "session")
+    monkeypatch.setattr(client_module, "SESSION_PATH", state_dir / "session")
     monkeypatch.setattr(cli_module, "_setup", lambda: _setup_isolated(tmp_path))
     return tmp_path
 
@@ -31,14 +35,14 @@ def _setup_isolated(home: Path):
     from cf_tool.client import Client
     from cf_tool.config import Config
 
-    cfg = Config.load(home / ".cf" / "config")
-    return cfg, Client(cfg, session_path=home / ".cf" / "session")
+    cfg = Config.load(home / ".config" / "cf" / "config")
+    return cfg, Client(cfg, session_path=home / ".local" / "state" / "cf" / "session")
 
 
 def write_config(home: Path, template: dict) -> None:
-    cf_dir = home / ".cf"
-    cf_dir.mkdir(exist_ok=True)
-    (cf_dir / "config").write_text(json.dumps({"template": [template], "default": 0}))
+    config_dir = home / ".config" / "cf"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config").write_text(json.dumps({"template": [template], "default": 0}))
 
 
 PY_TEMPLATE = {

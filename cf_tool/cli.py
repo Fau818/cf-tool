@@ -19,6 +19,7 @@ from pathlib import Path
 import click
 
 from cf_tool import __version__, judge, templates, ui
+from cf_tool import config as config_module
 from cf_tool.args import Info, parse_args
 from cf_tool.client import Client
 from cf_tool.config import PROBLEM_TYPES, CodeTemplate, Config
@@ -62,6 +63,8 @@ def main() -> None:
     Run "cf config" first to set your handle, password and code templates.
     If you want to compete, the best command is "cf race".
     """
+    for note in config_module.migrate_legacy_dir():
+        ui.yellow(f"config migration: {note}")
 
 
 # ------------------------------------------------------------------- config

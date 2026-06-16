@@ -69,8 +69,11 @@ Example C++ template config: before `g++ -O2 -o $%file%$ $%full%$`, script
 
 ## Files
 
-- `~/.cf/config` — templates, default template, host/proxy, folder names (JSON)
-- `~/.cf/session` — handle, AES-GCM-encrypted password, cookies, last submission
+- `$XDG_CONFIG_HOME/cf/config` (default `~/.config/cf/config`) — templates, default
+  template, host/proxy, folder names (JSON)
+- `$XDG_STATE_HOME/cf/session` (default `~/.local/state/cf/session`) — handle,
+  AES-GCM-encrypted password, cookies, last submission
+- A legacy `~/.cf` directory is migrated automatically on first run
 
 ## Development
 

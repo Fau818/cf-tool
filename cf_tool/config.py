@@ -1,20 +1,82 @@
-"""Config management at ~/.cf/config, mirroring xalanq/cf-tool's config package.
+"""Config management, mirroring xalanq/cf-tool's config package.
 
 The JSON schema (keys, defaults) is kept identical to the Go tool so behavior
-documented in its README applies here unchanged.
+documented in its README applies here unchanged. Locations follow XDG instead
+of the Go tool's ~/.cf: config in $XDG_CONFIG_HOME/cf, the session (cookies,
+encrypted credentials) in $XDG_STATE_HOME/cf. A legacy ~/.cf is migrated
+automatically on startup.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 PROBLEM_TYPES = ("contest", "gym", "group", "acmsguru")
 
-CF_DIR = Path.home() / ".cf"
-CONFIG_PATH = CF_DIR / "config"
-SESSION_PATH = CF_DIR / "session"
+
+def _xdg(env_var: str, default: Path) -> Path:
+    value = os.environ.get(env_var, "")
+    return Path(value).expanduser() if value else default
+
+
+CONFIG_DIR = _xdg("XDG_CONFIG_HOME", Path.home() / ".config") / "cf"
+STATE_DIR = _xdg("XDG_STATE_HOME", Path.home() / ".local" / "state") / "cf"
+CONFIG_PATH = CONFIG_DIR / "config"
+SESSION_PATH = STATE_DIR / "session"
+LEGACY_DIR = Path.home() / ".cf"
+
+
+def migrate_legacy_dir() -> list[str]:
+    """One-time move of the pre-XDG ~/.cf directory.
+
+    config -> CONFIG_PATH, session -> SESSION_PATH, anything else (template
+    files) -> CONFIG_DIR; template paths inside the config JSON that pointed
+    into ~/.cf are rewritten to follow. Returns human-readable move notes.
+    """
+    if not LEGACY_DIR.is_dir() or LEGACY_DIR == CONFIG_DIR:
+        return []
+    notes: list[str] = []
+    for item in sorted(LEGACY_DIR.iterdir()):
+        if item.name == "session":
+            target = SESSION_PATH
+        elif item.name == "config":
+            target = CONFIG_PATH
+        else:
+            target = CONFIG_DIR / item.name
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        item.rename(target)
+        notes.append(f"moved {item} -> {target}")
+    if notes and CONFIG_PATH.is_file():
+        _rewrite_legacy_template_paths()
+    try:
+        LEGACY_DIR.rmdir()
+    except OSError:
+        notes.append(f"left {LEGACY_DIR} in place (not empty)")
+    return notes
+
+
+def _rewrite_legacy_template_paths() -> None:
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    legacy = str(LEGACY_DIR)
+    changed = False
+    for template in data.get("template", []):
+        path = str(Path(str(template.get("path", ""))).expanduser())
+        if path.startswith(legacy + os.sep):
+            template["path"] = str(CONFIG_DIR / os.path.relpath(path, legacy))
+            changed = True
+    if changed:
+        CONFIG_PATH.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+
 
 DEFAULT_HOST = "https://codeforces.com"
 

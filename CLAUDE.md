@@ -32,9 +32,9 @@ cf_tool/
 ├── args.py       # parse_args(): specifier/path -> Info (port of cmd/args.go).
 │                 #   Explicit args win; cwd fills blanks; >=6-digit id => gym;
 │                 #   acmsguru rewrites contest->99999. Info builds all URLs/paths.
-├── config.py     # ~/.cf/config JSON (same schema as Go: template/default/
-│                 #   gen_after_parse/host/proxy/folder_name)
-├── client.py     # session state (~/.cf/session) + every network op:
+├── config.py     # XDG config/state paths + ~/.cf migration; config JSON (same
+│                 #   schema as Go: template/default/gen_after_parse/host/...)
+├── client.py     # session state ($XDG_STATE_HOME/cf/session) + network ops:
 │                 #   login tiers, parse, statis, race, submit, watch, pull, clone
 ├── http.py       # curl_cffi Transport (Chrome TLS impersonation), retry,
 │                 #   Cloudflare challenge detection -> CloudflareChallengeError

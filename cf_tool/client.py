@@ -18,7 +18,9 @@ from pathlib import Path
 from threading import Lock
 from urllib.parse import urlparse
 
+from rich import box
 from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
@@ -321,7 +323,7 @@ class Client:
             raise CFError(message)
         ui.green("Submitted")
 
-        submissions = self.watch(info, count=1)
+        submissions = self.watch(info, count=1, line=True)
         self.handle = handle
         last = dataclasses.replace(info, submission_id=str(submissions[0].id))
         self.last_submission = {k: getattr(last, k) for k in _INFO_KEYS}
@@ -330,9 +332,10 @@ class Client:
     # ---------------------------------------------------------------- watch
 
     def _submission_table(self, submissions: list[pages.Submission], problem_id: str) -> Table:
-        table = Table(box=None, header_style="bold")
+        table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
+        # long columns may wrap on narrow terminals; the short ones never do
         for column in ("#", "when", "problem", "lang", "status", "time", "memory"):
-            table.add_column(column, justify="center")
+            table.add_column(column, justify="center", no_wrap=column in ("#", "time", "memory"))
         for sub in submissions:
             if problem_id and sub.problem_index() != problem_id.lower():
                 continue
@@ -348,10 +351,30 @@ class Client:
             )
         return table
 
+    def _submission_block(self, sub: pages.Submission) -> Panel:
+        """Single-submission detail view (the Go tool's `line` display)."""
+        status, style = sub.styled_status()
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(justify="right", style="bold cyan")
+        grid.add_column()
+        grid.add_row("#:", str(sub.id))
+        grid.add_row("when:", sub.when)
+        grid.add_row("prob:", sub.name)
+        grid.add_row("lang:", sub.lang)
+        grid.add_row("status:", Text(status, style=style or "white"))
+        grid.add_row("time:", sub.parse_time() if sub.end else "-")
+        grid.add_row("memory:", sub.parse_memory() if sub.end else "-")
+        border = style if sub.end and style else "dim"
+        return Panel(grid, box=box.ROUNDED, border_style=border, expand=False)
+
     def watch(
-        self, info: Info, count: int = 10, problem_filter: str = ""
+        self, info: Info, count: int = 10, problem_filter: str = "", line: bool = False
     ) -> list[pages.Submission]:
-        """Poll the my-submissions page every ~1s until all verdicts are final."""
+        """Poll the my-submissions page every ~1s until all verdicts are final.
+
+        line=True shows the latest submission as a detail block (used after
+        submit, like the Go tool); otherwise a table of recent submissions.
+        """
         url = info.my_submission_url(self.host)
         submissions: list[pages.Submission] = []
         with Live(console=ui.console, auto_refresh=False) as live:
@@ -359,7 +382,11 @@ class Client:
                 started = time.monotonic()
                 body = self._authed_body(url)
                 submissions = pages.parse_submissions(body, count)
-                live.update(self._submission_table(submissions, problem_filter), refresh=True)
+                if line:
+                    renderable = self._submission_block(submissions[0])
+                else:
+                    renderable = self._submission_table(submissions, problem_filter)
+                live.update(renderable, refresh=True)
                 if all(sub.end for sub in submissions):
                     return submissions
                 elapsed = time.monotonic() - started

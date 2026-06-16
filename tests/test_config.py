@@ -1,9 +1,10 @@
-"""Tests for config load/save round-trip and defaults."""
+"""Tests for config load/save round-trip, defaults, and ~/.cf migration."""
 
 import json
 from pathlib import Path
 
-from cf_tool.config import CodeTemplate, Config
+import cf_tool.config as config_module
+from cf_tool.config import CodeTemplate, Config, migrate_legacy_dir
 
 
 def test_defaults():
@@ -81,3 +82,54 @@ def test_templates_by_alias():
     )
     assert len(cfg.templates_by_alias("cpp")) == 2
     assert cfg.templates_by_alias("rs") == []
+
+
+def _patch_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path, Path]:
+    legacy = tmp_path / ".cf"
+    config_dir = tmp_path / ".config" / "cf"
+    state_dir = tmp_path / ".local" / "state" / "cf"
+    monkeypatch.setattr(config_module, "LEGACY_DIR", legacy)
+    monkeypatch.setattr(config_module, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_module, "STATE_DIR", state_dir)
+    monkeypatch.setattr(config_module, "CONFIG_PATH", config_dir / "config")
+    monkeypatch.setattr(config_module, "SESSION_PATH", state_dir / "session")
+    return legacy, config_dir, state_dir
+
+
+def test_migrate_legacy_dir(tmp_path, monkeypatch):
+    legacy, config_dir, state_dir = _patch_paths(monkeypatch, tmp_path)
+    legacy.mkdir()
+    (legacy / "config").write_text(
+        json.dumps({"template": [{"alias": "cpp", "path": str(legacy / "template.cpp")}]})
+    )
+    (legacy / "session").write_text("{}")
+    (legacy / "template.cpp").write_text("int main() {}\n")
+
+    notes = migrate_legacy_dir()
+
+    assert len(notes) == 3
+    assert not legacy.exists()
+    assert (state_dir / "session").read_text() == "{}"
+    assert (config_dir / "template.cpp").is_file()
+    cfg = json.loads((config_dir / "config").read_text())
+    # template paths pointing into ~/.cf follow the move
+    assert cfg["template"][0]["path"] == str(config_dir / "template.cpp")
+
+
+def test_migrate_noop_without_legacy(tmp_path, monkeypatch):
+    _patch_paths(monkeypatch, tmp_path)
+    assert migrate_legacy_dir() == []
+
+
+def test_migrate_keeps_existing_targets(tmp_path, monkeypatch):
+    legacy, config_dir, _ = _patch_paths(monkeypatch, tmp_path)
+    legacy.mkdir()
+    (legacy / "config").write_text("old")
+    config_dir.mkdir(parents=True)
+    (config_dir / "config").write_text("new")
+
+    notes = migrate_legacy_dir()
+
+    assert (config_dir / "config").read_text() == "new"
+    assert (legacy / "config").read_text() == "old"  # never overwritten
+    assert any("in place" in n for n in notes)
