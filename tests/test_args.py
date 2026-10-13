@@ -132,7 +132,8 @@ def test_parse_path_custom_folder_names():
 def test_infer_everything_from_cwd(cfg):
     info = parse_args([], Path("/h/cf/contest/1136/a"), cfg)
     assert (info.problem_type, info.contest_id, info.problem_id) == ("contest", "1136", "a")
-    assert info.root_path == Path("/h/cf/contest")
+    # resolve(): on Windows the result carries a drive letter
+    assert info.root_path == Path("/h/cf/contest").resolve()
 
 
 def test_arg_overrides_path(cfg):
@@ -144,7 +145,8 @@ def test_explicit_specifiers_outside_root(cfg):
     info = parse_args(["1136", "a"], Path("/h/somewhere"), cfg)
     assert (info.problem_type, info.contest_id, info.problem_id) == ("contest", "1136", "a")
     # no root among ancestors: a root folder is created under cwd
-    assert info.root_path == Path("/h/somewhere/cf/contest")
+    # resolve(): on Windows the result carries a drive letter
+    assert info.root_path == Path("/h/somewhere/cf/contest").resolve()
 
 
 def test_combined_specifier(cfg):
@@ -178,7 +180,8 @@ def test_group_cwd(cfg):
     info = parse_args([], Path("/h/cf/group/Cw4JRyRGXR/269760/a"), cfg)
     assert info.problem_type == "group"
     assert info.group_id == "Cw4JRyRGXR"
-    assert info.path() == Path("/h/cf/group/Cw4JRyRGXR/269760/a")
+    # resolve(): on Windows the result carries a drive letter
+    assert info.path() == Path("/h/cf/group/Cw4JRyRGXR/269760/a").resolve()
 
 
 def test_path_type_not_consulted_when_arg_sets_type(cfg):
@@ -193,7 +196,8 @@ def test_path_type_not_consulted_when_arg_sets_type(cfg):
 
 def test_path_lowercases_problem_id(cfg):
     info = parse_args(["1136A"], Path("/h"), cfg)
-    assert info.path() == Path("/h/cf/contest/1136/a")
+    # resolve(): on Windows the result carries a drive letter
+    assert info.path() == Path("/h/cf/contest/1136/a").resolve()
     assert info.problem_id == "A"  # original case kept for URLs
 
 

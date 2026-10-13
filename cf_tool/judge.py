@@ -1,15 +1,17 @@
 """Local testing (`cf test`): run before_script / script / after_script,
 feed in{i}.txt, compare with ans{i}.txt. Port of cmd/test.go.
 
-Like the original, there is no time limit — interrupt a hung solution with
-Ctrl+C. Output comparison strips per-line surrounding whitespace only.
+As in the original: no time limit (interrupt a hung solution with Ctrl+C),
+outputs are compared after trimming each line, the time shown is the
+program's user CPU time (wall time where the OS can't report it), and
+scripts are split into words by the Go tool's own rules, so a config shared
+with the Go tool runs identically.
 """
 
 from __future__ import annotations
 
-import difflib
 import re
-import shlex
+import signal
 import subprocess
 import threading
 import time
@@ -17,9 +19,14 @@ from pathlib import Path
 
 import psutil
 
-from cf_tool import templates, ui
-from cf_tool.config import Config
+from cf_tool import codefiles, templates, ui, views
+from cf_tool.config import NO_TEMPLATE, Config
 from cf_tool.errors import CFError
+
+try:
+    import resource
+except ImportError:  # Windows
+    resource = None
 
 _IN_FILE_RE = re.compile(r"^in(\d+)\.txt$")
 
@@ -39,12 +46,64 @@ def plain(text: str) -> str:
     return "".join(line.strip() + "\n" for line in text.splitlines())
 
 
+def split_cmd(command: str) -> list[str]:
+    """Words of a script, by the Go tool's splitCmd rules.
+
+    Whitespace separates words; a quote of either kind opens a span that the
+    next quote of either kind closes. Nothing else is special — unlike
+    shlex, backslashes stay literal, so Windows paths survive.
+    """
+    words: list[str] = []
+    word: list[str] = []
+    quoted = False
+    for char in command:
+        if char.isspace() and not quoted:
+            if word:
+                words.append("".join(word))
+                word.clear()
+        elif char in "\"'":
+            if quoted:
+                words.append("".join(word))
+                word.clear()
+            quoted = not quoted
+        else:
+            word.append(char)
+    if word:
+        words.append("".join(word))
+    return words
+
+
 def format_memory(num_bytes: float) -> str:
     if num_bytes > 1024 * 1024:
         return f"{num_bytes / 1024 / 1024:.3f}MB"
     if num_bytes > 1024:
         return f"{num_bytes / 1024:.3f}KB"
     return f"{int(num_bytes)}B"
+
+
+def _exit_reason(returncode: int) -> str:
+    if returncode < 0:
+        try:
+            return f"killed by {signal.Signals(-returncode).name}"
+        except ValueError:
+            return f"killed by signal {-returncode}"
+    return f"exit status {returncode}"
+
+
+def _start(command: str, **kwargs) -> subprocess.Popen:
+    argv = split_cmd(command)
+    if not argv:
+        raise CFError("Invalid script command. Please check config file")
+    try:
+        return subprocess.Popen(argv, **kwargs)
+    except OSError as e:
+        raise CFError(f"Cannot run {argv[0]!r}: {e.strerror or e}") from e
+
+
+def _children_cpu() -> float:
+    """User CPU seconds of all finished child processes so far."""
+    assert resource is not None
+    return resource.getrusage(resource.RUSAGE_CHILDREN).ru_utime
 
 
 def _watch_memory(pid: int, peak: list[int], stop: threading.Event) -> None:
@@ -62,34 +121,40 @@ def run_script(script: str, cwd: Path) -> None:
     if not script:
         return
     ui.plain(script)
-    result = subprocess.run(shlex.split(script), cwd=cwd)
-    if result.returncode != 0:
-        raise CFError(f"exit status {result.returncode}")
+    process = _start(script, cwd=cwd, stdin=subprocess.DEVNULL)
+    if process.wait() != 0:
+        raise CFError(_exit_reason(process.returncode))
 
 
 def judge(sample_id: str, command: str, cwd: Path) -> bool:
-    """Run one sample; print Passed/Failed line plus diff. Returns pass/fail."""
+    """Run one sample; print Passed/Failed (plus a diff). Returns pass/fail."""
     in_path = cwd / f"in{sample_id}.txt"
     ans_path = cwd / f"ans{sample_id}.txt"
 
     peak = [0]
     stop = threading.Event()
-    start = time.perf_counter()
+    cpu_start = _children_cpu() if resource else 0.0
+    wall_start = time.perf_counter()
     with in_path.open("rb") as stdin:
-        process = subprocess.Popen(
-            shlex.split(command), stdin=stdin, stdout=subprocess.PIPE, cwd=cwd
-        )
+        process = _start(command, stdin=stdin, stdout=subprocess.PIPE, cwd=cwd)
         watcher = threading.Thread(target=_watch_memory, args=(process.pid, peak, stop))
         watcher.start()
         try:
             raw_out, _ = process.communicate()
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
         finally:
             stop.set()
             watcher.join()
-    elapsed = time.perf_counter() - start
+    if resource:
+        elapsed = _children_cpu() - cpu_start
+    else:
+        elapsed = time.perf_counter() - wall_start
 
     if process.returncode != 0:
-        raise CFError(f"Runtime Error #{sample_id} ... exit status {process.returncode}")
+        raise CFError(f"Runtime Error #{sample_id} ... {_exit_reason(process.returncode)}")
 
     try:
         ans = plain(ans_path.read_text(encoding="utf-8", errors="replace"))
@@ -98,44 +163,41 @@ def judge(sample_id: str, command: str, cwd: Path) -> bool:
     out = plain(raw_out.decode(errors="replace"))
 
     passed = out == ans
-    state = f"[green]Passed #{sample_id}[/green]" if passed else f"[red]Failed #{sample_id}[/red]"
-    ui.console.print(f"{state} ... {elapsed:.3f}s {format_memory(peak[0])}")
+    verdict = (f"Passed #{sample_id}", "green") if passed else (f"Failed #{sample_id}", "red")
+    ui.line(verdict, (f" ... {elapsed:.3f}s {format_memory(peak[0])}", ""))
     if not passed:
-        ui.cyan("-----Input-----")
-        ui.plain(in_path.read_text(encoding="utf-8", errors="replace").rstrip("\n"))
-        ui.cyan("-----Output-----")
-        ui.plain(out.rstrip("\n"))
-        ui.cyan("-----Answer-----")
-        ui.plain(ans.rstrip("\n"))
-        ui.cyan("-----Diff-----")
-        for line in difflib.unified_diff(out.splitlines(), ans.splitlines(), lineterm="", n=2):
-            if line.startswith("-"):
-                ui.console.print(line, style="red")
-            elif line.startswith("+"):
-                ui.console.print(line, style="green")
-            elif not line.startswith(("---", "+++", "@@")):
-                ui.plain(line)
+        sample_input = in_path.read_text(encoding="utf-8", errors="replace")
+        ui.console.print(views.failed_sample(sample_input, out.splitlines(), ans.splitlines()))
     return passed
 
 
-def run_test(cfg: Config, file_arg: str | None, cwd: Path) -> None:
-    """`cf test [file]`: full flow from cmd/test.go."""
+def run_test(
+    cfg: Config, file_arg: str | None, cwd: Path, contest: str = "", problem: str = ""
+) -> None:
+    """`cf test [file]`: full flow from cmd/test.go, plus a summary line.
+    contest/problem (from the directory) help pick the right code file."""
     if not cfg.template:
-        raise CFError("You have to add at least one code template by `cf config`")
+        raise CFError(NO_TEMPLATE)
     samples = get_sample_ids(cwd)
     if not samples:
         raise CFError("Cannot find any sample file")
-    filename, index = templates.get_one_code(file_arg, cfg.template, cwd)
+    # only files in cwd: the scripts run there, with $%full%$ relative to it
+    filename, index = codefiles.pick(
+        file_arg, cfg.template, cwd, contest=contest, problem=problem, action="test"
+    )
     template = cfg.template[index]
     subs = templates.script_substitutions(filename)
-
-    run_script(templates.substitute_script(template.before_script, **subs), cwd)
     script = templates.substitute_script(template.script, **subs)
     if not script:
         raise CFError("Invalid script command. Please check config file")
+
+    run_script(templates.substitute_script(template.before_script, **subs), cwd)
+    passed = 0
     for sample_id in samples:
         try:
-            judge(sample_id, script, cwd)
+            passed += judge(sample_id, script, cwd)
         except CFError as e:
             ui.red(str(e))
+    style = "bold green" if passed == len(samples) else "bold red"
+    ui.line((f"{passed}/{len(samples)} passed", style))
     run_script(templates.substitute_script(template.after_script, **subs), cwd)

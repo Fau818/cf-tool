@@ -3,7 +3,11 @@
 Function names and regexes follow the Go client (findHandle, findCsrf, ...)
 so behavior can be diffed against the original. Sample extraction also
 handles the newer markup where each line sits in a
-<div class="test-example-line"> instead of being <br>-separated.
+<div class="test-example-line"> instead of being <br>-separated, and the
+free-form "Sample Input" statements of acmsguru.
+
+Also here: recognising the pages that stand *between* us and Codeforces
+(Cloudflare's interstitial, Codeforces' own Turnstile gate).
 """
 
 from __future__ import annotations
@@ -22,6 +26,9 @@ _CSRF_RE = re.compile(r"csrf='(.+?)'")
 _CSRF_DATA_RE = re.compile(r'data-csrf=[\'"]([a-f0-9]+)[\'"]')
 _INPUT_RE = re.compile(r'class="input"[\s\S]*?<pre[^>]*>([\s\S]*?)</pre>')
 _OUTPUT_RE = re.compile(r'class="output"[\s\S]*?<pre[^>]*>([\s\S]*?)</pre>')
+# acmsguru statements are free-form: "Sample Input" <p>, then a <pre>
+_SGU_INPUT_RE = re.compile(r"Sample\s+Input[\s\S]*?<pre[^>]*>([\s\S]*?)</pre>", re.IGNORECASE)
+_SGU_OUTPUT_RE = re.compile(r"Sample\s+Output[\s\S]*?<pre[^>]*>([\s\S]*?)</pre>", re.IGNORECASE)
 _COUNTDOWN_RE = re.compile(r'class=["\']countdown["\'][\s\S]*?(\d+):(\d+):(\d+)')
 _ERROR_MSG_RE = re.compile(r'error[a-zA-Z_\- ]*">(.*?)</span>')
 _SHOW_MSG_RE = re.compile(
@@ -43,6 +50,38 @@ _STANDARD_OUTPUT_RE = re.compile(
     r'class="output-file output-standard"|'
     r'class="output-file[^"]*"><div class="property-title">output</div>\s*(standard output|stdout)<'
 )
+
+# Cloudflare's managed-challenge interstitial. Never use "challenge-platform"
+# as a marker: every normal page embeds Cloudflare's bot-detection script
+# from /cdn-cgi/challenge-platform/scripts/jsd/.
+_CLOUDFLARE_MARKERS = ("<title>Just a moment", "_cf_chl_opt")
+# Codeforces' own Turnstile gate posts the solved token here, then reloads
+_VERIFICATION_MARKER = "/data/turnstile"
+_CAPTCHA_WORDS_RE = re.compile(r"captcha|robot|human|turnstile|verif", re.IGNORECASE)
+
+
+def is_cloudflare_challenge(body: str) -> bool:
+    return any(marker in body for marker in _CLOUDFLARE_MARKERS)
+
+
+def is_verification_gate(body: str) -> bool:
+    return _VERIFICATION_MARKER in body
+
+
+def is_gate(body: str) -> bool:
+    """True for a page that stands in front of the content: Cloudflare's
+    interstitial or Codeforces' own Turnstile verification page."""
+    return is_cloudflare_challenge(body) or is_verification_gate(body)
+
+
+def has_turnstile(body: str) -> bool:
+    """True when the page carries a Turnstile widget (only a browser can solve it)."""
+    return "cf-turnstile" in body
+
+
+def is_captcha_error(message: str) -> bool:
+    """True when a form error is about the human check, not the credentials."""
+    return bool(_CAPTCHA_WORDS_RE.search(message))
 
 
 def find_handle(body: str) -> str | None:
@@ -69,7 +108,9 @@ def _pre_to_text(inner: str) -> str:
     markup and the newer one-<div>-per-line markup."""
     if "test-example-line" in inner:
         lines = re.findall(r"<div[^>]*>([\s\S]*?)</div>", inner)
-        text = "\n".join(html_lib.unescape(_TAG_RE.sub("", line)).strip() for line in lines)
+        # only the whole text is trimmed (as Go does): leading spaces inside
+        # a line can be part of the input, e.g. ASCII-art grids
+        text = "\n".join(html_lib.unescape(_TAG_RE.sub("", line)) for line in lines)
         return text.strip() + "\n"
     text = re.sub(r"<[\s/br]+?>", "\n", inner)  # the Go tool's <br> normalizer
     text = _TAG_RE.sub("", text)
@@ -77,8 +118,12 @@ def _pre_to_text(inner: str) -> str:
 
 
 def find_samples(body: str) -> tuple[list[str], list[str]]:
+    """Sample (inputs, outputs) as text, each ending with a newline."""
     inputs = _INPUT_RE.findall(body)
     outputs = _OUTPUT_RE.findall(body)
+    if not inputs and not outputs:
+        inputs = _SGU_INPUT_RE.findall(body)
+        outputs = _SGU_OUTPUT_RE.findall(body)
     if not inputs or not outputs or len(inputs) != len(outputs):
         raise CFError(f"Cannot parse sample with input {len(inputs)} and output {len(outputs)}")
     return [_pre_to_text(s) for s in inputs], [_pre_to_text(s) for s in outputs]
@@ -97,8 +142,12 @@ def find_countdown(body: str) -> int:
 
 
 def find_error_message(body: str) -> str | None:
-    match = _ERROR_MSG_RE.search(body)
-    return match.group(1) if match else None
+    """First non-empty form error (forms also carry empty error placeholders)."""
+    for match in _ERROR_MSG_RE.finditer(body):
+        message = html_lib.unescape(_TAG_RE.sub("", match.group(1))).strip()
+        if message:
+            return message
+    return None
 
 
 def find_message(body: str) -> str | None:

@@ -1,7 +1,12 @@
-# Problem: $PROBLEM$ - Contest: $CONTEST$
+# $%U%$  $%Y%$-$%M%$-$%D%$ $%h%$:$%m%$
+import sys
 
-def solve():
+input = sys.stdin.readline
+
+
+def main():
     pass
 
+
 if __name__ == "__main__":
-    solve()
+    main()

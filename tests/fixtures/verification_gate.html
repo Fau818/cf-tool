@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Verification</title>
+</head>
+<body>
+
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
+    <script>
+        /**
+         * Success callback.
+         * Triggered automatically by Cloudflare when the user passes the challenge.
+         */
+        function onTurnstileSuccess(token) {
+            // Prepare data
+            const params = new URLSearchParams();
+            params.append("action", "verify");
+            params.append("response", token);
+
+            // Send request immediately via Fetch API
+            fetch("/data/turnstile", {
+                method: "POST",
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                },
+                body: params
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error("Network response was not ok");
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Check server response
+                if (data.success === "true" || data.success === true) {
+                    // Success: Reload the page to access the content
+                    window.location.reload();
+                } else {
+                    throw new Error("Server verification failed");
+                }
+            })
+            .catch(error => {
+                console.error("Verification error:", error);
+                
+                // UX: Alert the user and reset the widget so they can try again
+                alert("Verification failed or network error. Please try again.");
+                
+                if (window.turnstile) {
+                    turnstile.reset();
+                }
+            });
+        }
+
+        /**
+         * Expiration callback.
+         * Triggered if the user solved the captcha but the token expired.
+         */
+        function onTurnstileExpired() {
+            // Usually nothing to do here in auto-submit mode, 
+            // but we can reset to be safe.
+            if (window.turnstile) {
+                turnstile.reset();
+            }
+        }
+    </script>
+
+    <div class="cf-turnstile" 
+         data-sitekey="0x4AAAAAAAEGyUgr73JXd1d-" 
+         data-callback="onTurnstileSuccess"
+         data-expired-callback="onTurnstileExpired">
+    </div>
+
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b0179c13bfa993e',t:'MTc2NjA5MDQyOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b017aa22c102dab',t:'MTc2NjA5MDQ2NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" integrity="sha512-ZpsOmlRQV6y907TI0dKBHq9Md29nnaEIPlkf84rnaERnq6zvWvPUqr2ft8M1aS28oN72PdrCzSjY4U6VaAw1EQ==" data-cf-beacon='{"version":"2024.11.0","token":"316c29dfa3804effb5a91c52a59b5bd0","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>

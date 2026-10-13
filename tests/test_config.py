@@ -1,10 +1,15 @@
-"""Tests for config load/save round-trip, defaults, and ~/.cf migration."""
+"""Tests for config load/save round-trip, defaults, and the ~/.cf import."""
 
 import json
+import os
+import stat
 from pathlib import Path
 
+import pytest
+
 import cf_tool.config as config_module
-from cf_tool.config import CodeTemplate, Config, migrate_legacy_dir
+from cf_tool.config import CodeTemplate, Config, import_legacy_dir, write_atomic
+from cf_tool.errors import CFError
 
 
 def test_defaults():
@@ -18,7 +23,8 @@ def test_defaults():
         "group": "group",
         "acmsguru": "acmsguru",
     }
-    assert cfg.default_template is None
+    with pytest.raises(CFError, match="add at least one code template"):
+        cfg.default_template()
 
 
 def test_load_missing_file(tmp_path):
@@ -48,7 +54,7 @@ def test_round_trip(tmp_path):
     loaded = Config.load(path)
     assert loaded.template == cfg.template
     assert loaded.gen_after_parse is True
-    assert loaded.default_template.alias == "cpp"
+    assert loaded.default_template().alias == "cpp"
 
 
 def test_default_index_clamped(tmp_path):
@@ -70,6 +76,30 @@ def test_partial_folder_name_filled(tmp_path):
     cfg = Config.load(path)
     assert cfg.folder_name["root"] == "codeforces"
     assert cfg.folder_name["gym"] == "gym"
+
+
+def test_broken_config_is_an_error_not_a_reset(tmp_path):
+    path = tmp_path / "config"
+    path.write_text('{"template": [')  # truncated
+    with pytest.raises(CFError, match="broken"):
+        Config.load(path)
+    assert path.read_text() == '{"template": ['  # left alone for the user to fix
+
+
+def test_suffix_string_is_split(tmp_path):
+    path = tmp_path / "config"
+    path.write_text(json.dumps({"template": [{"alias": "cpp", "suffix": "cpp cc"}]}))
+    assert Config.load(path).template[0].suffix == ["cpp", "cc"]
+
+
+def test_write_atomic_sets_mode_and_leaves_no_temp_files(tmp_path):
+    path = tmp_path / "state" / "session"
+    write_atomic(path, "{}", mode=0o600)
+    write_atomic(path, '{"a": 1}', mode=0o600)
+    assert path.read_text() == '{"a": 1}'
+    if os.name == "posix":  # Windows has no such permission bits
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert [p.name for p in path.parent.iterdir()] == ["session"]
 
 
 def test_templates_by_alias():
@@ -96,40 +126,35 @@ def _patch_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path, Path]:
     return legacy, config_dir, state_dir
 
 
-def test_migrate_legacy_dir(tmp_path, monkeypatch):
+def test_import_copies_and_leaves_legacy_intact(tmp_path, monkeypatch):
     legacy, config_dir, state_dir = _patch_paths(monkeypatch, tmp_path)
     legacy.mkdir()
-    (legacy / "config").write_text(
-        json.dumps({"template": [{"alias": "cpp", "path": str(legacy / "template.cpp")}]})
-    )
+    (legacy / "config").write_text('{"template": []}')
     (legacy / "session").write_text("{}")
-    (legacy / "template.cpp").write_text("int main() {}\n")
 
-    notes = migrate_legacy_dir()
+    notes = import_legacy_dir()
 
-    assert len(notes) == 3
-    assert not legacy.exists()
-    assert (state_dir / "session").read_text() == "{}"
-    assert (config_dir / "template.cpp").is_file()
-    cfg = json.loads((config_dir / "config").read_text())
-    # template paths pointing into ~/.cf follow the move
-    assert cfg["template"][0]["path"] == str(config_dir / "template.cpp")
+    assert len(notes) == 2
+    # the Go tool keeps working: nothing under ~/.cf is moved or changed
+    assert sorted(p.name for p in legacy.iterdir()) == ["config", "session"]
+    assert (config_dir / "config").read_text() == '{"template": []}'
+    if os.name == "posix":
+        assert stat.S_IMODE((state_dir / "session").stat().st_mode) == 0o600
+    # second run: everything is in place, nothing to say
+    assert import_legacy_dir() == []
 
 
-def test_migrate_noop_without_legacy(tmp_path, monkeypatch):
+def test_import_noop_without_legacy(tmp_path, monkeypatch):
     _patch_paths(monkeypatch, tmp_path)
-    assert migrate_legacy_dir() == []
+    assert import_legacy_dir() == []
 
 
-def test_migrate_keeps_existing_targets(tmp_path, monkeypatch):
+def test_import_never_overwrites(tmp_path, monkeypatch):
     legacy, config_dir, _ = _patch_paths(monkeypatch, tmp_path)
     legacy.mkdir()
     (legacy / "config").write_text("old")
     config_dir.mkdir(parents=True)
     (config_dir / "config").write_text("new")
 
-    notes = migrate_legacy_dir()
-
+    assert import_legacy_dir() == []
     assert (config_dir / "config").read_text() == "new"
-    assert (legacy / "config").read_text() == "old"  # never overwritten
-    assert any("in place" in n for n in notes)

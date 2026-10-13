@@ -1,259 +1,100 @@
-"""Codeforces client: session persistence, tiered login, and every network
-operation (parse/submit/watch/pull/clone/...). Port of the Go client package.
-
-Login tiers (first that works wins):
-  0. existing cookies are still valid
-  1. plain HTTP POST /enter (the original Go flow) over curl_cffi
-  2. headless browser (DrissionPage) — solves Turnstile in the background
-  3. visible browser — last resort, announced to the user
+"""Codeforces operations: parse, list, race, submit, watch, pull, clone and
+the language list. Port of the Go client package; getting in (HTTP,
+Cloudflare, login) is gateway.py's job, drawing is views.py's.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import json
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
-from urllib.parse import urlparse
 
-from rich import box
 from rich.live import Live
-from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
-from cf_tool import browser, crypto, langs, pages, templates, ui
-from cf_tool.args import Info
+from cf_tool import langs, pages, ui, views
+from cf_tool.args import ERROR_NEED_PROBLEM_ID, Info
 from cf_tool.config import SESSION_PATH, Config
-from cf_tool.errors import CFError, CloudflareChallengeError, NotLoggedInError
-from cf_tool.http import Transport
+from cf_tool.errors import CFError
+from cf_tool.gateway import Gateway, host_domain
+from cf_tool.session import INFO_KEYS, Session
 
 ERROR_SKIP = "Exists, skip"
 ERROR_TOO_MANY_REQUESTS = "Too many requests"
-_BFAA = "f1b3f18c715565b589b7823cda7448ce"
-
-_INFO_KEYS = ("problem_type", "contest_id", "group_id", "problem_id", "submission_id")
+PARSE_THREADS = 8
+CLONE_THREADS = 16
 
 
 class Client:
-    def __init__(self, cfg: Config, session_path: Path = SESSION_PATH) -> None:
+    def __init__(self, cfg: Config, session_path: Path | None = None) -> None:
         self.cfg = cfg
-        self._path = session_path
-        data: dict = {}
-        try:
-            data = json.loads(session_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            pass
-        self.handle: str = data.get("handle", "")
-        self.handle_or_email: str = data.get("handle_or_email", "")
-        self.password: str = data.get("password", "")  # encrypted (crypto.py)
-        self.ftaa: str = data.get("ftaa", "")
-        self.bfaa: str = data.get("bfaa", "")
-        self.user_agent: str = data.get("user_agent", "")
-        self.last_submission: dict | None = data.get("last_submission")
-        self.http = Transport(
-            proxy=cfg.proxy,
-            user_agent=self.user_agent,
-            cookies=data.get("cookies", {}),
-            domain=urlparse(cfg.host).hostname or "",
-        )
+        self.session = Session.load(session_path or SESSION_PATH, host_domain(cfg.host))
+        self.gw = Gateway(cfg, self.session)
 
     @property
     def host(self) -> str:
         return self.cfg.host
 
-    def save(self) -> None:
-        data = {
-            "handle": self.handle,
-            "handle_or_email": self.handle_or_email,
-            "password": self.password,
-            "ftaa": self.ftaa,
-            "bfaa": self.bfaa,
-            "user_agent": self.user_agent,
-            "cookies": self.http.cookies,
-            "last_submission": self.last_submission,
-        }
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        self._path.chmod(0o600)
+    @property
+    def handle(self) -> str:
+        return self.session.handle
 
-    # ------------------------------------------------------------ transport
-
-    def _adopt_browser_session(self, session: browser.BrowserSession) -> None:
-        self.http.set_cookies(session.cookies, replace=True)
-        if session.user_agent:
-            self.user_agent = session.user_agent
-            self.http.set_user_agent(session.user_agent)
-        self.save()
-
-    def get_body(self, url: str) -> str:
-        """GET with Cloudflare fallback: headless browser, then visible."""
-        try:
-            return self.http.get(url).text
-        except CloudflareChallengeError:
-            pass
-        ui.yellow("Cloudflare challenge hit; solving in a background browser...")
-        for headless in (True, False):
-            if not headless:
-                ui.yellow("Headless attempt failed; opening a visible browser window...")
-            try:
-                session = browser.fetch(url, headless=headless)
-            except CFError:
-                continue
-            self._adopt_browser_session(session)
-            try:
-                return self.http.get(url).text
-            except CloudflareChallengeError:
-                # transport still blocked, but the browser page itself is real content
-                if not any(m in session.html for m in ("Just a moment", "cf-chl")):
-                    return session.html
-        raise CloudflareChallengeError()
-
-    def _authed_body(self, url: str) -> str:
-        """GET a page that needs login; silently re-login once if logged out."""
-        body = self.get_body(url)
-        if pages.find_handle(body) is not None:
-            return body
-        ui.red("Not logged. Try to login\n")
-        self.login()
-        body = self.get_body(url)
-        pages.require_handle(body)
-        return body
-
-    # ----------------------------------------------------------------- auth
-
-    def login(self) -> None:
-        """Tiered login with stored credentials."""
-        if not self.handle_or_email or not self.password:
-            raise CFError("You have to configure your handle and password by `cf config`")
-        password = crypto.decrypt_password(self.handle_or_email, self.password)
-        ui.cyan(f"Login {self.handle_or_email}...")
-
-        try:
-            if self._login_http(password):
-                return
-        except (CFError, CloudflareChallengeError) as e:
-            ui.yellow(f"HTTP login failed ({e}); trying a headless browser...")
-        else:
-            ui.yellow("HTTP login failed; trying a headless browser...")
-        try:
-            if self._login_browser(password, headless=True):
-                return
-            ui.yellow("Headless login failed (browser session not authenticated); ")
-        except CFError as e:
-            ui.yellow(f"Headless login failed ({e}); ")
-        ui.yellow("Opening a visible browser (Cloudflare Turnstile)...")
-        if self._login_browser(password, headless=False):
-            return
-        raise CFError("Login failed on all tiers. Check your handle/password")
-
-    def _welcome(self, handle: str) -> None:
-        self.handle = handle
-        self.save()
-        ui.green("Succeed!!")
-        ui.green(f"Welcome {handle}~")
-
-    def _login_http(self, password: str) -> bool:
-        body = self.http.get(f"{self.host}/enter").text
-        handle = pages.find_handle(body)
-        if handle:  # cookies were still valid
-            self._welcome(handle)
-            return True
-        csrf = pages.find_csrf(body)
-        ftaa = templates.rand_string(18)
-        bfaa = _BFAA
-        body = self.http.post(
-            f"{self.host}/enter",
-            data={
-                "csrf_token": csrf,
-                "action": "enter",
-                "ftaa": ftaa,
-                "bfaa": bfaa,
-                "handleOrEmail": self.handle_or_email,
-                "password": password,
-                "_tta": "176",
-                "remember": "on",
-            },
-        ).text
-        handle = pages.find_handle(body)
-        if not handle:
-            error = pages.find_error_message(body)
-            raise CFError(error or "Login failed")
-        self.ftaa = ftaa
-        self.bfaa = bfaa
-        self._welcome(handle)
-        return True
-
-    def _login_browser(self, password: str, headless: bool) -> bool:
-        session = browser.login(self.host, self.handle_or_email, password, headless=headless)
-        self._adopt_browser_session(session)
-        browser_handle = pages.find_handle(session.html)
-        try:
-            body = self.http.get(self.host).text
-            handle = pages.find_handle(body)
-        except CloudflareChallengeError:
-            handle = None
-        if not handle:
-            if browser_handle:
-                # the browser IS logged in; the exported cookies just don't
-                # satisfy Cloudflare over curl_cffi (cf_clearance is bound to
-                # the TLS fingerprint, not only the UA)
-                raise CFError(
-                    "browser login succeeded but the exported session "
-                    "is rejected over HTTP (Cloudflare binding)"
-                )
-            return False
-        if not self.ftaa:
-            self.ftaa = templates.rand_string(18)
-        if not self.bfaa:
-            self.bfaa = _BFAA
-        self._welcome(handle)
-        return True
+    @property
+    def last_submission(self) -> dict[str, str] | None:
+        return self.session.last_submission
 
     def config_login(self, handle_or_email: str, password: str) -> None:
         """Store credentials (encrypted) and log in."""
-        self.handle_or_email = handle_or_email
-        self.password = crypto.encrypt_password(handle_or_email, password)
-        self.save()
-        self.login()
+        self.gw.set_credentials(handle_or_email, password)
+        self.gw.login()
 
     # ---------------------------------------------------------------- parse
 
     def parse_problem(self, url: str, path: Path) -> tuple[int, bool]:
-        """Download one problem's samples into path as in{i}.txt/ans{i}.txt."""
-        body = self._authed_body(url)
+        """Download one problem's samples into path as in{i}.txt/ans{i}.txt;
+        returns (sample count, standard input/output?)."""
+        body = self.gw.get_authed(url)
         inputs, outputs = pages.find_samples(body)
         path.mkdir(parents=True, exist_ok=True)
         for i, (sample_in, sample_out) in enumerate(zip(inputs, outputs), start=1):
-            (path / f"in{i}.txt").write_text(sample_in, encoding="utf-8")
-            (path / f"ans{i}.txt").write_text(sample_out, encoding="utf-8")
+            (path / f"in{i}.txt").write_text(sample_in, encoding="utf-8", newline="")
+            (path / f"ans{i}.txt").write_text(sample_out, encoding="utf-8", newline="")
         return len(inputs), pages.is_standard_io(body)
 
     def parse(self, info: Info) -> tuple[list[str], list[Path]]:
+        """Parse one problem, or every problem of the contest concurrently;
+        returns (problem ids, their directories)."""
         ui.cyan("Parse " + info.hint())
         if info.problem_id:
             problem_ids = [info.problem_id]
         else:
             problem_ids = [p.id for p in self.statis(info)]
         contest_root = dataclasses.replace(info, problem_id="").path()
-        ui.console.print(
-            f"[cyan]The problem(s) will be saved to[/cyan] [green]{contest_root}[/green]"
-        )
-        paths = []
-        for problem_id in problem_ids:
-            path = contest_root / problem_id.lower()
-            paths.append(path)
-            ui.plain(f"Parsing {problem_id}")
+        ui.line(("The problem(s) will be saved to ", "cyan"), (str(contest_root), "green"))
+        paths = [contest_root / problem_id.lower() for problem_id in problem_ids]
+        for path in paths:
+            # up front, like Go: "gen after parse" writes into every one,
+            # even where the samples could not be parsed
+            path.mkdir(parents=True, exist_ok=True)
+
+        def work(problem_id: str, path: Path) -> None:
             url = dataclasses.replace(info, problem_id=problem_id).problem_url(self.host)
             try:
                 samples, standard_io = self.parse_problem(url, path)
             except CFError as e:
                 ui.red(f"Failed {problem_id}. Error: {e}")
-                continue
-            warning = "" if standard_io else " [yellow]Non standard input output format.[/yellow]"
-            ui.console.print(f"[green]Parsed {problem_id} with {samples} samples.[/green]{warning}")
+                return
+            noun = "sample" if samples == 1 else "samples"
+            parts = [(f"Parsed {problem_id} with {samples} {noun}.", "green")]
+            if not standard_io:
+                parts.append((" Non standard input output format.", "yellow"))
+            ui.line(*parts)
+
+        with ThreadPoolExecutor(max_workers=min(PARSE_THREADS, len(problem_ids))) as pool:
+            list(pool.map(work, problem_ids, paths))
         return problem_ids, paths
 
     # ----------------------------------------------------------------- list
@@ -261,48 +102,54 @@ class Client:
     def statis(self, info: Info) -> list[pages.StatisInfo]:
         if info.problem_type == "acmsguru":
             raise CFError("Not support acmsguru")
-        body = self._authed_body(info.problem_set_url(self.host))
+        body = self.gw.get_authed(info.problem_set_url(self.host))
         return pages.parse_problems(body)
 
     # ----------------------------------------------------------------- race
 
     def race(self, info: Info) -> None:
+        """Count down to the contest start (no-op once it has begun)."""
         ui.cyan("Race " + info.hint())
         if info.problem_type == "acmsguru":
             raise CFError("Not support acmsguru")
-        url = info.problem_set_url(self.host) + "/countdown"
-        body = self._authed_body(url)
-        if "Go!</a>" not in body:
-            count = pages.find_countdown(body)
-            ui.green("Countdown: ")
-            while count > 0:
-                h, rem = divmod(count, 3600)
-                m, s = divmod(rem, 60)
-                print(f"\r{h:02d}:{m:02d}:{s:02d}", end="", flush=True)
-                time.sleep(1)
-                count -= 1
-            print()
-            time.sleep(0.9)
+        body = self.gw.get_authed(info.problem_set_url(self.host) + "/countdown")
+        if "Go!</a>" in body:
+            return
+        # against a fixed deadline: sleeping 1s per tick would drift late
+        deadline = time.monotonic() + pages.find_countdown(body)
+        with Live(console=ui.console, auto_refresh=False, transient=True) as live:
+            while (remaining := deadline - time.monotonic()) > 0:
+                h, rest = divmod(math.ceil(remaining), 3600)
+                m, s = divmod(rest, 60)
+                live.update(
+                    Text.assemble(("Countdown: ", "green"), (f"{h:02d}:{m:02d}:{s:02d}", "bold")),
+                    refresh=True,
+                )
+                time.sleep(remaining - math.floor(remaining) or 1)  # until the next tick
+        time.sleep(0.9)
 
     # --------------------------------------------------------------- submit
 
-    def submit(self, info: Info, lang_id: str, source: str) -> None:
-        ui.cyan("Submit " + info.hint())
+    def submit(self, info: Info, lang_id: str, source: str, filename: str = "") -> None:
+        """Submit source, then watch its verdict; filename is only shown."""
+        if filename:
+            ui.line(("Submit ", "cyan"), (filename, "bold green"), (f" to {info.hint()}", "cyan"))
+        else:
+            ui.cyan("Submit " + info.hint())
+        if not info.problem_id:
+            raise CFError(ERROR_NEED_PROBLEM_ID)
         url = info.submit_url(self.host)
-        body = self._authed_body(url)
+        body = self.gw.get_authed(url)
         handle = pages.require_handle(body)
         ui.plain(f"Current user: {handle}")
         csrf = pages.find_csrf(body)
-        if not self.ftaa:
-            self.ftaa = templates.rand_string(18)
-        if not self.bfaa:
-            self.bfaa = _BFAA
-        body = self.http.post(
+        ftaa, bfaa = self.gw.form_tokens()
+        body = self.gw.post(
             f"{url}?csrf_token={csrf}",
             data={
                 "csrf_token": csrf,
-                "ftaa": self.ftaa,
-                "bfaa": self.bfaa,
+                "ftaa": ftaa,
+                "bfaa": bfaa,
                 "action": "submitSolutionFormSubmitted",
                 "submittedProblemIndex": info.problem_id,
                 "programTypeId": lang_id,
@@ -312,7 +159,7 @@ class Client:
                 "_tta": "594",
                 "sourceCodeConfirmed": "true",
             },
-        ).text
+        )
         error = pages.find_error_message(body)
         if error:
             raise CFError(error)
@@ -324,78 +171,48 @@ class Client:
         ui.green("Submitted")
 
         submissions = self.watch(info, count=1, line=True)
-        self.handle = handle
+        self.session.handle = handle
         last = dataclasses.replace(info, submission_id=str(submissions[0].id))
-        self.last_submission = {k: getattr(last, k) for k in _INFO_KEYS}
-        self.save()
+        self.session.last_submission = {key: getattr(last, key) for key in INFO_KEYS}
+        self.gw.save()
 
     # ---------------------------------------------------------------- watch
-
-    def _submission_table(self, submissions: list[pages.Submission], problem_id: str) -> Table:
-        table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
-        # long columns may wrap on narrow terminals; the short ones never do
-        for column in ("#", "when", "problem", "lang", "status", "time", "memory"):
-            table.add_column(column, justify="center", no_wrap=column in ("#", "time", "memory"))
-        for sub in submissions:
-            if problem_id and sub.problem_index() != problem_id.lower():
-                continue
-            status, style = sub.styled_status()
-            table.add_row(
-                str(sub.id),
-                sub.when,
-                sub.name,
-                sub.lang,
-                Text(status, style=style),
-                sub.parse_time(),
-                sub.parse_memory(),
-            )
-        return table
-
-    def _submission_block(self, sub: pages.Submission) -> Panel:
-        """Single-submission detail view (the Go tool's `line` display)."""
-        status, style = sub.styled_status()
-        grid = Table.grid(padding=(0, 1))
-        grid.add_column(justify="right", style="bold cyan")
-        grid.add_column()
-        grid.add_row("#:", str(sub.id))
-        grid.add_row("when:", sub.when)
-        grid.add_row("prob:", sub.name)
-        grid.add_row("lang:", sub.lang)
-        grid.add_row("status:", Text(status, style=style or "white"))
-        grid.add_row("time:", sub.parse_time() if sub.end else "-")
-        grid.add_row("memory:", sub.parse_memory() if sub.end else "-")
-        border = style if sub.end and style else "dim"
-        return Panel(grid, box=box.ROUNDED, border_style=border, expand=False)
 
     def watch(
         self, info: Info, count: int = 10, problem_filter: str = "", line: bool = False
     ) -> list[pages.Submission]:
-        """Poll the my-submissions page every ~1s until all verdicts are final.
+        """Poll the my-submissions page about once a second until every verdict
+        is final; returns the submissions.
 
-        line=True shows the latest submission as a detail block (used after
-        submit, like the Go tool); otherwise a table of recent submissions.
+        line=True shows the newest submission as a detail panel (the view
+        after submit, like the Go tool); otherwise a table of recent ones.
         """
         url = info.my_submission_url(self.host)
-        submissions: list[pages.Submission] = []
-        with Live(console=ui.console, auto_refresh=False) as live:
+
+        def render(submissions: list[pages.Submission]):
+            if line:
+                return views.submission_panel(submissions[0])
+            return views.submission_table(submissions, problem_filter)
+
+        # transient while judging; the final state is then printed in full
+        # (a live display gets cut to the terminal height)
+        with Live(console=ui.console, auto_refresh=False, transient=True) as live:
             while True:
                 started = time.monotonic()
-                body = self._authed_body(url)
-                submissions = pages.parse_submissions(body, count)
-                if line:
-                    renderable = self._submission_block(submissions[0])
-                else:
-                    renderable = self._submission_table(submissions, problem_filter)
-                live.update(renderable, refresh=True)
+                submissions = pages.parse_submissions(self.gw.get_authed(url), count)
                 if all(sub.end for sub in submissions):
-                    return submissions
+                    break
+                live.update(render(submissions), refresh=True)
                 elapsed = time.monotonic() - started
                 if elapsed < 1:
                     time.sleep(1 - elapsed)
+        ui.console.print(render(submissions))
+        return submissions
 
     # ----------------------------------------------------------- pull/clone
 
     def pull_code(self, url: str, base: Path, ext: str, rename: bool) -> Path:
+        """Save one submission's source as <base><ext>; returns the file."""
         filename = Path(f"{base}{ext}")
         if rename:
             i = 1
@@ -405,22 +222,22 @@ class Client:
         elif filename.exists():
             raise CFError(ERROR_SKIP)
 
-        body = self.get_body(url)
+        body = self.gw.get(url)
         message = pages.find_message(body)
         if message is not None:
             raise CFError(message)
         code = pages.find_code(body)
         filename.parent.mkdir(parents=True, exist_ok=True)
-        filename.write_text(code, encoding="utf-8")
+        filename.write_text(code, encoding="utf-8", newline="")
         return filename
 
     def pull(self, info: Info, root_path: Path, ac: bool) -> None:
         ui.cyan("Pull " + info.hint())
-        body = self._authed_body(info.my_submission_url(self.host))
+        body = self.gw.get_authed(info.my_submission_url(self.host))
         submissions = pages.parse_submissions(body)
         used = []
         for sub in submissions:
-            problem_id = sub.name.split(" ")[0].lower()
+            problem_id = sub.problem_index()
             if info.problem_id and info.problem_id.lower() != problem_id:
                 continue
             if ac and not ("Accepted" in sub.status or "Pretests passed" in sub.status):
@@ -444,24 +261,25 @@ class Client:
         if not used:
             raise CFError("Cannot find any code to save")
         ui.cyan("These submissions' codes have been saved.")
-        ui.console.print(self._submission_table(used, ""))
+        ui.console.print(views.submission_table(used))
 
     def clone(self, handle: str, root_path: Path, ac: bool) -> None:
         ui.cyan(f"Clone all codes of {handle}. Only Accepted: {ac}")
-        data = self.http.get_json(f"{self.host}/api/user.status?handle={handle}")
+        data = self.gw.get_json(f"{self.host}/api/user.status?handle={handle}")
         if data.get("status") != "OK":
             raise CFError("Cannot get any submission")
         submissions = data["result"]
         total = len(submissions)
         ui.cyan(f"Total submissions: {total}")
 
-        lock = Lock()
-        counter = {"n": 0}
+        lock, done = Lock(), 0
 
         def bump() -> int:
+            """Count one more submission handled; returns the count."""
+            nonlocal done
             with lock:
-                counter["n"] += 1
-                return counter["n"]
+                done += 1
+                return done
 
         jobs = []
         for sub in submissions:
@@ -484,11 +302,11 @@ class Client:
             if ac and verdict != "OK":
                 ui.green(f"{bump()}/{total} Skip {info.hint()}: Not an accepted code")
                 continue
-            ext = langs.ext_of(sub.get("programmingLanguage", ""))
+            language = sub.get("programmingLanguage", "")
+            ext = langs.ext_of(language)
             if ext == "txt":
                 ui.red(
-                    f"{bump()}/{total} Error {info.hint()}: Language "
-                    f'"{sub.get("programmingLanguage", "")}" is not supported'
+                    f'{bump()}/{total} Error {info.hint()}: Language "{language}" is not supported'
                 )
                 continue
             filename = submission_id
@@ -496,7 +314,7 @@ class Client:
                 filename = f"{submission_id}_{verdict.lower()}_{sub.get('passedTestCount', 0)}"
             jobs.append((info.submission_url(self.host), info.path() / filename, f".{ext}"))
 
-        def worker(job) -> None:
+        def worker(job: tuple[str, Path, str]) -> None:
             url, base, ext = job
             while True:
                 try:
@@ -513,19 +331,19 @@ class Client:
                         ui.red(f"{bump()}/{total} Error {url}: {e}")
                 return
 
-        with ThreadPoolExecutor(max_workers=16) as pool:
+        with ThreadPoolExecutor(max_workers=CLONE_THREADS) as pool:
             list(pool.map(worker, jobs))
 
     # ------------------------------------------------------------ languages
 
-    def languages(self) -> dict[str, str]:
-        """Live language list from the submit form; static fallback if not
-        logged in / offline (no login is forced just for the list)."""
+    def languages(self) -> tuple[dict[str, str], bool]:
+        """(id -> name, is_live): the submit form's list when logged in, else
+        the built-in table. Never opens a browser just for this list."""
         try:
-            body = self.get_body(f"{self.host}/problemset/submit")
-            live = pages.parse_languages(body)
-            if live:
-                return live
-        except (CFError, NotLoggedInError):
-            pass
-        return langs.LANGS
+            body = self.gw.get(f"{self.host}/problemset/submit", browser_fallback=False)
+        except CFError:
+            return langs.LANGS, False
+        live = pages.parse_languages(body)
+        if live:
+            return live, True
+        return langs.LANGS, False

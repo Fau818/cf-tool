@@ -3,18 +3,26 @@
 The JSON schema (keys, defaults) is kept identical to the Go tool so behavior
 documented in its README applies here unchanged. Locations follow XDG instead
 of the Go tool's ~/.cf: config in $XDG_CONFIG_HOME/cf, the session (cookies,
-encrypted credentials) in $XDG_STATE_HOME/cf. A legacy ~/.cf is migrated
-automatically on startup.
+encrypted credentials) in $XDG_STATE_HOME/cf. On first run a Go tool's ~/.cf
+is imported (copied, never moved: an installed Go cf keeps working).
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shutil
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
+
+from cf_tool.errors import CFError
 
 PROBLEM_TYPES = ("contest", "gym", "group", "acmsguru")
+DEFAULT_HOST = "https://codeforces.com"
+NO_TEMPLATE = "You have to add at least one code template by `cf config`"
 
 
 def _xdg(env_var: str, default: Path) -> Path:
@@ -29,56 +37,36 @@ SESSION_PATH = STATE_DIR / "session"
 LEGACY_DIR = Path.home() / ".cf"
 
 
-def migrate_legacy_dir() -> list[str]:
-    """One-time move of the pre-XDG ~/.cf directory.
+def write_atomic(path: Path, text: str, mode: int = 0o644) -> None:
+    """Replace path with text in one step, created with the given permissions
+    (a Ctrl-C mid-write never leaves a truncated file behind)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
-    config -> CONFIG_PATH, session -> SESSION_PATH, anything else (template
-    files) -> CONFIG_DIR; template paths inside the config JSON that pointed
-    into ~/.cf are rewritten to follow. Returns human-readable move notes.
-    """
-    if not LEGACY_DIR.is_dir() or LEGACY_DIR == CONFIG_DIR:
+
+def import_legacy_dir() -> list[str]:
+    """Copy config and session from the Go tool's ~/.cf where the XDG files
+    don't exist yet. Returns human-readable notes for what was copied."""
+    if not LEGACY_DIR.is_dir():
         return []
-    notes: list[str] = []
-    for item in sorted(LEGACY_DIR.iterdir()):
-        if item.name == "session":
-            target = SESSION_PATH
-        elif item.name == "config":
-            target = CONFIG_PATH
-        else:
-            target = CONFIG_DIR / item.name
-        if target.exists():
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        item.rename(target)
-        notes.append(f"moved {item} -> {target}")
-    if notes and CONFIG_PATH.is_file():
-        _rewrite_legacy_template_paths()
-    try:
-        LEGACY_DIR.rmdir()
-    except OSError:
-        notes.append(f"left {LEGACY_DIR} in place (not empty)")
+    notes = []
+    for name, target, mode in (("config", CONFIG_PATH, 0o644), ("session", SESSION_PATH, 0o600)):
+        source = LEGACY_DIR / name
+        if source.is_file() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+            os.chmod(target, mode)
+            notes.append(f"copied {source} -> {target}")
     return notes
-
-
-def _rewrite_legacy_template_paths() -> None:
-    try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    legacy = str(LEGACY_DIR)
-    changed = False
-    for template in data.get("template", []):
-        path = str(Path(str(template.get("path", ""))).expanduser())
-        if path.startswith(legacy + os.sep):
-            template["path"] = str(CONFIG_DIR / os.path.relpath(path, legacy))
-            changed = True
-    if changed:
-        CONFIG_PATH.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
-
-
-DEFAULT_HOST = "https://codeforces.com"
 
 
 @dataclass
@@ -95,9 +83,12 @@ class CodeTemplate:
     after_script: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CodeTemplate":
-        known = {f for f in cls.__dataclass_fields__}
-        return cls(**{k: v for k, v in data.items() if k in known})
+    def from_dict(cls, data: dict[str, Any]) -> "CodeTemplate":
+        known = set(cls.__dataclass_fields__)
+        values = {k: v for k, v in data.items() if k in known}
+        if isinstance(values.get("suffix"), str):  # hand-edited "cpp" instead of ["cpp"]
+            values["suffix"] = values["suffix"].split()
+        return cls(**values)
 
 
 @dataclass
@@ -108,9 +99,9 @@ class Config:
     host: str = DEFAULT_HOST
     proxy: str = ""
     folder_name: dict[str, str] = field(default_factory=dict)
+    _path: Path = field(default_factory=lambda: CONFIG_PATH, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        self._path = CONFIG_PATH
         self._normalize()
 
     def _normalize(self) -> None:
@@ -121,21 +112,29 @@ class Config:
             self.folder_name.setdefault(problem_type, problem_type)
 
     @classmethod
-    def load(cls, path: Path = CONFIG_PATH) -> "Config":
+    def load(cls, path: Path | None = None) -> "Config":
+        """Read the config; a missing file gives the defaults, a broken one
+        is an error (rather than silently replacing the user's templates)."""
+        path = Path(path or CONFIG_PATH)
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = {}
-        cfg = cls(
-            template=[CodeTemplate.from_dict(t) for t in data.get("template", [])],
-            default=data.get("default", 0),
-            gen_after_parse=data.get("gen_after_parse", False),
-            host=data.get("host", DEFAULT_HOST),
-            proxy=data.get("proxy", ""),
-            folder_name=dict(data.get("folder_name", {})),
-        )
-        cfg._path = Path(path)
-        return cfg
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return cls(_path=path)
+        except OSError as e:
+            raise CFError(f"Cannot read config {path}: {e}") from e
+        try:
+            data = json.loads(text) if text.strip() else {}
+            return cls(
+                template=[CodeTemplate.from_dict(t) for t in data.get("template") or []],
+                default=int(data.get("default", 0)),
+                gen_after_parse=bool(data.get("gen_after_parse", False)),
+                host=data.get("host") or DEFAULT_HOST,
+                proxy=data.get("proxy") or "",
+                folder_name=dict(data.get("folder_name") or {}),
+                _path=path,
+            )
+        except (ValueError, TypeError, AttributeError) as e:
+            raise CFError(f"Config {path} is broken ({e}). Fix or delete it.") from e
 
     def save(self) -> None:
         self._normalize()
@@ -147,16 +146,13 @@ class Config:
             "proxy": self.proxy,
             "folder_name": self.folder_name,
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        write_atomic(self._path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
     def templates_by_alias(self, alias: str) -> list[CodeTemplate]:
         return [t for t in self.template if t.alias == alias]
 
-    @property
-    def default_template(self) -> CodeTemplate | None:
+    def default_template(self) -> CodeTemplate:
+        """The default template; CFError when there is none yet."""
         if not self.template:
-            return None
+            raise CFError(NO_TEMPLATE)
         return self.template[self.default]

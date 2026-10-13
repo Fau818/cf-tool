@@ -4,26 +4,31 @@
      | sid | race | pull | clone | upgrade
 
 Each command body stays thin: parse specifiers via args.parse_args, then call
-one client/judge/templates function.
+one client/judge/templates function. Errors end up in cf_command: a red
+message instead of a traceback (CF_DEBUG=1 shows the traceback too).
 """
 
 from __future__ import annotations
 
 import functools
 import getpass
+import os
 import re
 import sys
+import traceback
 import webbrowser
 from pathlib import Path
 
 import click
 
-from cf_tool import __version__, judge, templates, ui
+from cf_tool import __version__, codefiles, judge, templates, ui, views
 from cf_tool import config as config_module
 from cf_tool.args import Info, parse_args
 from cf_tool.client import Client
 from cf_tool.config import PROBLEM_TYPES, CodeTemplate, Config
 from cf_tool.errors import CFError
+
+REPOSITORY = "Fau818/cf-tool"
 
 
 def _setup() -> tuple[Config, Client]:
@@ -40,14 +45,22 @@ def _open_url(url: str) -> None:
     webbrowser.open(url)
 
 
+def _fail(message: str) -> None:
+    if os.environ.get("CF_DEBUG"):
+        traceback.print_exc()
+    ui.red(message)
+    sys.exit(1)
+
+
 def cf_command(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         try:
             return f(*args, **kwargs)
         except CFError as e:
-            ui.red(str(e))
-            sys.exit(1)
+            _fail(str(e))
+        except OSError as e:  # unreadable/unwritable files and the like
+            _fail(str(e))
         except KeyboardInterrupt:
             print("\nInterrupted.")
             sys.exit(1)
@@ -63,8 +76,12 @@ def main() -> None:
     Run "cf config" first to set your handle, password and code templates.
     If you want to compete, the best command is "cf race".
     """
-    for note in config_module.migrate_legacy_dir():
-        ui.yellow(f"config migration: {note}")
+    try:
+        notes = config_module.import_legacy_dir()
+    except OSError as e:
+        notes = [f"could not import ~/.cf ({e})"]
+    for note in notes:
+        ui.yellow(f"Go cf-tool settings: {note}")
 
 
 # ------------------------------------------------------------------- config
@@ -103,7 +120,9 @@ def _config_login(client: Client) -> None:
 
 def _config_add_template(cfg: Config, client: Client) -> None:
     ui.cyan("Add a template")
-    languages = client.languages()
+    languages, live = client.languages()
+    if not live:
+        ui.yellow("Not logged in: showing a built-in language list (login first for the live one).")
     lang = ui.select(
         "Language (type to filter):",
         [
@@ -205,10 +224,12 @@ def _config_host(cfg: Config) -> None:
 
 def _config_proxy(cfg: Config) -> None:
     proxy_re = re.compile(r"[\w\-]+?://[\w\-]+(\.[\w\-]+)*(:\d+)?")
+    ui.green(
+        f"Current proxy is {cfg.proxy}" if cfg.proxy else "Current proxy is based on environment"
+    )
     ui.cyan("Empty line uses the proxy from the environment.")
     proxy = ui.text(
         'Proxy (e.g. "http://127.0.0.1:2333", "socks5://127.0.0.1:1080"):',
-        default=cfg.proxy,
         validate=lambda s: (not s.strip()) or bool(proxy_re.match(s.strip())) or "Invalid proxy",
     )
     cfg.proxy = proxy
@@ -283,9 +304,50 @@ def submit(file_arg: str | None, specifiers: tuple[str, ...]) -> None:
     """Submit a solution (auto-detects file, contest and problem)."""
     cfg, client = _setup()
     info = _resolve(specifiers, cfg)
-    filename, index = templates.get_one_code(file_arg, cfg.template, Path.cwd())
-    source = Path(filename).read_text(encoding="utf-8")
-    client.submit(info, cfg.template[index].lang, source)
+    filename, index = codefiles.pick(
+        file_arg,
+        cfg.template,
+        Path.cwd(),
+        contest=info.contest_id,
+        problem=info.problem_id,
+        search_folders=True,
+    )
+    info = _submit_target(info, filename, specifiers, cfg)
+    source = codefiles.read_source(filename)
+    client.submit(info, cfg.template[index].lang, source, filename=filename)
+
+
+def _label(contest: str, problem: str) -> str:
+    """546D, problem D or contest 546: what a file name points at."""
+    if contest and problem:
+        return f"{contest}{problem.upper()}"
+    return f"problem {problem.upper()}" if problem else f"contest {contest}"
+
+
+def _submit_target(info: Info, filename: str, specifiers: tuple[str, ...], cfg: Config) -> Info:
+    """The problem to submit filename to: info, its gaps filled in from what
+    the file's name says. Both a file named for another problem and a target
+    read off the name need a yes first."""
+    contest, problem = codefiles.named_target(filename, Path.cwd())
+    clash = (info.contest_id and contest and contest != info.contest_id) or (
+        info.problem_id and problem and problem.lower() != info.problem_id.lower()
+    )
+    if clash:
+        question = f"{filename} looks like {_label(contest, problem)}. Submit it to {info.hint()}?"
+        if not ui.confirm(question, default=False):
+            raise CFError("Not submitted")
+        return info
+    missing = [
+        value
+        for value, known in ((contest, info.contest_id), (problem, info.problem_id))
+        if value and not known
+    ]
+    if not missing:
+        return info
+    info = _resolve(specifiers + tuple(missing), cfg)
+    if not ui.confirm(f"Submit {filename} to {info.hint()}?", default=True):
+        raise CFError("Not submitted")
+    return info
 
 
 @main.command("list")
@@ -295,23 +357,7 @@ def list_(specifiers: tuple[str, ...]) -> None:
     """List problems' stats of a contest."""
     cfg, client = _setup()
     info = _resolve(specifiers, cfg)
-    problems = client.statis(info)
-    from rich.table import Table
-    from rich.text import Text
-
-    table = Table(box=None, header_style="bold")
-    for column in ("#", "problem", "passed", "limit", "IO"):
-        table.add_column(column, justify="center")
-    for prob in problems:
-        style = ""
-        if "accepted" in prob.state:
-            style = "black on green"
-        elif "rejected" in prob.state:
-            style = "black on red"
-        table.add_row(
-            *(Text(v, style=style) for v in (prob.id, prob.name, prob.passed, prob.limit, prob.io))
-        )
-    ui.console.print(table)
+    ui.console.print(views.problems_table(client.statis(info)))
 
 
 @main.command()
@@ -323,11 +369,9 @@ def parse(specifiers: tuple[str, ...]) -> None:
     info = _resolve(specifiers, cfg)
     source, ext = "", ""
     if cfg.gen_after_parse:
-        if not cfg.template:
-            raise CFError("You have to add at least one code template by `cf config`")
-        template_path = Path(cfg.template[cfg.default].path).expanduser()
+        template_path = Path(cfg.default_template().path).expanduser()
         ext = template_path.suffix
-        source = templates.substitute_code(template_path.read_text(encoding="utf-8"), client.handle)
+        source = templates.substitute_code(codefiles.read_source(template_path), client.handle)
     _, paths = client.parse(info)
     if cfg.gen_after_parse:
         for path in paths:
@@ -348,8 +392,9 @@ def gen(alias: str | None) -> None:
 @cf_command
 def test(file_arg: str | None) -> None:
     """Compile and run the solution against all in{i}.txt/ans{i}.txt pairs."""
-    cfg, _ = _setup()
-    judge.run_test(cfg, file_arg, Path.cwd())
+    cfg = Config.load()
+    info = _resolve((), cfg)  # the directory may say which problem this is
+    judge.run_test(cfg, file_arg, Path.cwd(), info.contest_id, info.problem_id)
 
 
 @main.command()
@@ -437,24 +482,51 @@ def clone(args: tuple[str, ...]) -> None:
     client.clone(handle, Path.cwd(), ac)
 
 
+_VERSION_RE = re.compile(r"v?(\d+(?:\.\d+)*)(?:[-._]?(a|alpha|b|beta|c|rc)[-._]?(\d*))?", re.I)
+_PRE_RANK = {"a": 0, "alpha": 0, "b": 1, "beta": 1, "c": 2, "rc": 2}
+
+
+def version_key(version: str) -> tuple[int, ...] | None:
+    """Sortable form of "0.3.0", "v0.3.0a1", "0.3.0-rc.2" (PEP 440 order:
+    0.3.0a1 < 0.3.0b1 < 0.3.0rc1 < 0.3.0); None if it is not a version."""
+    match = _VERSION_RE.fullmatch(version.strip())
+    if not match:
+        return None
+    release = [int(n) for n in match.group(1).split(".")]
+    release += [0] * (4 - len(release))
+    tag = (match.group(2) or "").lower()
+    return (*release, _PRE_RANK.get(tag, 3), int(match.group(3) or 0))
+
+
 @main.command()
 @cf_command
 def upgrade() -> None:
-    """Check PyPI for a newer cf-tool release."""
+    """Check GitHub for a newer cf-tool release."""
     from curl_cffi import requests as curl_requests
 
     ui.cyan(f"Current version is {__version__}")
+    url = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=30"
     try:
-        data = curl_requests.get("https://pypi.org/pypi/cf-tool/json", timeout=10).json()
-        latest = data["info"]["version"]
-    except Exception:
-        raise CFError("Cannot fetch the latest version from PyPI")
-    if latest == __version__:
+        response = curl_requests.get(url, timeout=10)
+    except Exception as e:
+        raise CFError(f"Cannot reach GitHub: {e}") from e
+    if response.status_code != 200:
+        raise CFError(f"Cannot list the releases of {REPOSITORY} ({response.status_code})")
+    current = version_key(__version__) or ()
+    on_prerelease = current[-2:-1] != (3,)
+    # pre-releases are offered only to those already running one
+    tags = [
+        str(release.get("tag_name", ""))
+        for release in response.json()
+        if not release.get("draft") and (on_prerelease or not release.get("prerelease"))
+    ]
+    versions = [(key, tag) for tag in tags if (key := version_key(tag))]
+    if not versions:
+        raise CFError(f"No release of {REPOSITORY} is published on GitHub yet")
+    latest_key, latest = max(versions)
+    if latest_key <= current:
         ui.green("You already have the latest version")
-    else:
-        ui.green(f"Latest version is {latest}. Upgrade with:")
-        ui.plain("  uv pip install -U cf-tool   (or: pip install -U cf-tool)")
-
-
-if __name__ == "__main__":
-    main()
+        return
+    ui.green(f"Latest version is {latest}. Upgrade with:")
+    ui.plain(f"  uv tool install --force git+https://github.com/{REPOSITORY}@{latest}")
+    ui.plain(f"  (or: pipx install --force git+https://github.com/{REPOSITORY}@{latest})")

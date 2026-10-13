@@ -1,13 +1,20 @@
 """Tests for the local judge: sample discovery, comparison, full test flow."""
 
 import sys
-from pathlib import Path
 
 import pytest
 
 from cf_tool.config import CodeTemplate, Config
 from cf_tool.errors import CFError
-from cf_tool.judge import format_memory, get_sample_ids, judge, plain, run_test
+from cf_tool.judge import (
+    format_memory,
+    get_sample_ids,
+    judge,
+    plain,
+    run_script,
+    run_test,
+    split_cmd,
+)
 
 
 def make_samples(tmp_path, cases):
@@ -99,3 +106,56 @@ def test_run_test_requires_samples(tmp_path):
 def test_run_test_requires_templates(tmp_path):
     with pytest.raises(CFError, match="add at least one code template"):
         run_test(Config(), None, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "command,words",
+    [
+        ("g++ -O2 -o a a.cpp", ["g++", "-O2", "-o", "a", "a.cpp"]),
+        # backslashes stay literal (shlex turned this into C:Usersmea.exe)
+        (r"C:\Users\me\a.exe -v", [r"C:\Users\me\a.exe", "-v"]),
+        ('python3 "my file.py"', ["python3", "my file.py"]),
+        ("echo it's", ["echo", "its"]),  # Go: a lone quote just toggles, no error
+        ('a"b c"d', ["ab c", "d"]),
+        ("   ", []),
+    ],
+)
+def test_split_cmd_matches_go(command, words):
+    assert split_cmd(command) == words
+
+
+def test_missing_program_is_a_clean_error(tmp_path):
+    make_samples(tmp_path, [("1\n", "1\n")])
+    with pytest.raises(CFError, match="Cannot run 'no-such-binary-xyz'"):
+        judge("1", "no-such-binary-xyz", tmp_path)
+    with pytest.raises(CFError, match="Cannot run 'no-such-compiler-xyz'"):
+        run_script("no-such-compiler-xyz a.cpp", tmp_path)
+
+
+def test_failed_sample_shows_brackets_literally(tmp_path, capsys):
+    # Rich markup used to eat "[i]" / "[j]" and crash on "[/]"
+    make_samples(tmp_path, [("arr[i] = [j] [/]\n", "something else\n")])
+    assert judge("1", CAT, tmp_path) is False
+    out = capsys.readouterr().out
+    assert "arr[i] = [j] [/]" in out
+    assert "something else" in out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_signal_is_reported(tmp_path):
+    make_samples(tmp_path, [("", "")])
+    suicide = f'{sys.executable} -c "import os, signal; os.kill(os.getpid(), signal.SIGTERM)"'
+    with pytest.raises(CFError, match="killed by SIGTERM"):
+        judge("1", suicide, tmp_path)
+
+
+def test_run_test_prints_a_summary(tmp_path, capsys):
+    (tmp_path / "a.py").write_text("print(int(input()) * 2)\n")
+    make_samples(tmp_path, [("2\n", "4\n"), ("3\n", "7\n")])
+    cfg = Config(
+        template=[
+            CodeTemplate(alias="py", lang="31", suffix=["py"], script=f"{sys.executable} $%full%$")
+        ]
+    )
+    run_test(cfg, None, tmp_path)
+    assert "1/2 passed" in capsys.readouterr().out

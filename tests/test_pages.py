@@ -1,4 +1,7 @@
-"""Parser tests against representative Codeforces HTML snippets."""
+"""Parser tests: hand-written snippets plus pages trimmed from the live site
+(tests/fixtures, fetched 2026-10-12)."""
+
+from pathlib import Path
 
 import pytest
 
@@ -11,10 +14,23 @@ from cf_tool.pages import (
     find_handle,
     find_message,
     find_samples,
+    has_turnstile,
+    is_captcha_error,
+    is_cloudflare_challenge,
+    is_gate,
+    is_standard_io,
+    is_verification_gate,
     parse_languages,
     parse_problems,
     parse_submissions,
 )
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def fixture(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
 
 LOGGED_IN = '<script>var userInfo = { handle = "tourist" };</script>'
 CSRF = "<script>window.x = { csrf='deadbeef1234' };</script>"
@@ -79,8 +95,6 @@ def test_find_samples_mismatch():
 
 
 def test_is_standard_io():
-    from cf_tool.pages import is_standard_io
-
     modern = (
         '<div class="input-file input-standard"><div class="property-title">input</div>'
         'standard input</div><div class="output-file output-standard">'
@@ -110,6 +124,14 @@ def test_find_error_message():
     html = '<span class="error for__source">You have submitted exactly the same code before</span>'
     assert find_error_message(html) == "You have submitted exactly the same code before"
     assert find_error_message("<html></html>") is None
+
+
+def test_find_error_message_skips_empty_placeholders():
+    form = (
+        '<span class="error for__handleOrEmail"></span>'
+        '<span class="error for__password">Invalid handle/email or password</span>'
+    )
+    assert find_error_message(form) == "Invalid handle/email or password"
 
 
 def test_find_message():
@@ -199,7 +221,8 @@ SUBMISSIONS = """
   <td>Python 3.8.10</td>
   <td class="status-cell">
     <span class="submissionVerdictWrapper" submissionverdict="TESTING">
-      <span class="verdict-waiting">Running on test <span class="verdict-format-judged">3</span></span>
+      <span class="verdict-waiting">Running on test
+        <span class="verdict-format-judged">3</span></span>
     </span>
   </td>
   <td class="time-consumed-cell">-</td>
@@ -239,3 +262,96 @@ def test_parse_submissions_count():
 def test_parse_submissions_empty():
     with pytest.raises(CFError, match="Cannot find any submission"):
         parse_submissions("<html></html>")
+
+
+# ------------------------------------------------- live-site fixtures
+
+
+def test_cloudflare_interstitial_is_a_gate():
+    page = fixture("challenge_enter.html")
+    assert is_cloudflare_challenge(page)
+    assert is_gate(page)
+
+
+def test_codeforces_turnstile_page_is_a_gate():
+    page = fixture("verification_gate.html")
+    assert is_verification_gate(page)
+    assert is_gate(page)
+    assert has_turnstile(page)
+
+
+@pytest.mark.parametrize(
+    "name", ["problem_4a.html", "problem_2171a.html", "contest_2171.html", "submissions.html"]
+)
+def test_normal_pages_are_not_gates(name):
+    page = fixture(name)
+    # every normal page embeds Cloudflare's /cdn-cgi/challenge-platform/ bot
+    # script; that must not be mistaken for a challenge
+    assert "challenge-platform" in page
+    assert not is_gate(page)
+    assert not has_turnstile(page)
+
+
+def test_live_samples_br_markup():
+    page = fixture("problem_4a.html")
+    assert find_samples(page) == (["8\n"], ["YES\n"])
+    assert is_standard_io(page)
+
+
+def test_live_samples_line_markup():
+    inputs, outputs = find_samples(fixture("problem_2171a.html"))
+    assert inputs == ["5\n2\n3\n4\n6\n100\n"]
+    assert outputs == ["1\n0\n2\n2\n26\n"]
+
+
+def test_live_file_io_problem():
+    page = fixture("fileio_120a.html")
+    assert find_samples(page) == (["front\n1\n"], ["L\n"])
+    assert not is_standard_io(page)
+
+
+def test_line_markup_keeps_leading_spaces():
+    page = (
+        '<div class="input"><pre>'
+        '<div class="test-example-line test-example-line-0">2</div>'
+        '<div class="test-example-line test-example-line-1">  #</div>'
+        '</pre></div><div class="output"><pre>1</pre></div>'
+    )
+    assert find_samples(page)[0] == ["2\n  #\n"]
+
+
+def test_acmsguru_samples():
+    # acmsguru 100 "A+B": free-form statement, samples in bare <pre> blocks
+    assert find_samples(fixture("acmsguru_100.html")) == (["5 3\n"], ["8\n"])
+
+
+def test_live_problems_table():
+    problems = parse_problems(fixture("contest_2171.html"))
+    assert len(problems) == 9
+    assert problems[0].id == "A"
+    assert problems[0].name == "Shizuku Hoshikawa and Farm Legs"
+    assert (problems[0].io, problems[0].limit) == ("standard input/output", "1 s, 256 MB")
+    assert problems[0].passed.isdigit()
+
+
+def test_live_submissions():
+    subs = parse_submissions(fixture("submissions.html"))
+    assert [(s.id, s.lang, s.problem_index()) for s in subs] == [
+        (392264558, "PyPy 3-64", "b"),
+        (379163092, "C++20 (GCC 13-64)", "a"),
+        (379163040, "C++20 (GCC 13-64)", "a"),
+    ]
+    assert all(s.end for s in subs)
+    assert subs[1].styled_status() == ("Wrong answer on test 1", "blue")
+    assert subs[2].styled_status() == ("Accepted", "green")
+
+
+def test_live_countdown_over_a_day():
+    # "5 days" is shown; the exact time sits in the title attribute
+    assert find_countdown(fixture("countdown.html")) == 115 * 3600 + 5 * 60 + 5
+
+
+def test_is_captcha_error():
+    assert is_captcha_error("Please confirm you are not a robot")
+    assert is_captcha_error("Captcha verification failed")
+    assert not is_captcha_error("Invalid handle/email or password")
