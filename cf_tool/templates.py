@@ -52,8 +52,10 @@ def substitute_script(script: str, *, path: str, full: str, file: str, rand: str
 
 def script_substitutions(filename: str) -> dict[str, str]:
     """Compute the $%path%$/$%full%$/$%file%$/$%rand%$ values for a code file."""
-    directory, full = os.path.split(filename)
-    path = directory + os.sep if directory else ""
+    full = os.path.basename(filename)
+    # the folder as written, separator included (Go's filepath.Split): "dir/"
+    # stays "dir/" on Windows too
+    path = filename[: len(filename) - len(full)]
     file, _ = os.path.splitext(full)
     return {"path": path, "full": full, "file": file, "rand": rand_string(8)}
 
