@@ -332,12 +332,18 @@ class _Releases:
         return self.releases
 
 
-def _upgrade_with(monkeypatch, releases, current, status=200):
+def _upgrade_with(monkeypatch, releases, current, status=200, sent=None):
+    """cf upgrade against a fake releases list; the request headers go to sent."""
     import cf_tool.cli as cli_module
     from curl_cffi import requests as curl_requests
 
+    def get(url, timeout, headers):
+        if sent is not None:
+            sent.update(headers)
+        return _Releases(releases, status)
+
     monkeypatch.setattr(cli_module, "__version__", current)
-    monkeypatch.setattr(curl_requests, "get", lambda url, timeout: _Releases(releases, status))
+    monkeypatch.setattr(curl_requests, "get", get)
     return CliRunner().invoke(main, ["upgrade"])
 
 
@@ -353,6 +359,12 @@ def test_upgrade_offers_the_next_alpha_to_alpha_users(monkeypatch):
     assert result.exit_code == 0, result.output
     assert "Latest version is v0.3.0a2" in result.output
     assert "git+https://github.com/Fau818/cf-tool@v0.3.0a2" in result.output
+
+
+def test_upgrade_sends_a_user_agent(monkeypatch):
+    sent = {}
+    _upgrade_with(monkeypatch, RELEASES, "0.3.0a1", sent=sent)
+    assert sent["User-Agent"] == "cf-tool/0.3.0a1"  # without one GitHub's API answers 403
 
 
 def test_upgrade_up_to_date(monkeypatch):

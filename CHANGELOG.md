@@ -16,7 +16,7 @@ A Python port of xalanq/cf-tool for today's Cloudflare-protected Codeforces.
 - **`cf test`**: CPU time like the Go tool, a side-by-side diff for failed samples and a
   pass count; scripts are split by the Go tool's rules (Windows paths survive), and a
   missing compiler is a clear error, not a traceback.
-- **`cf pull` / `cf clone`** recognise today's language names (`C++20 (GCC 13-64)`, …).
+- **`cf pull` / `cf clone`** recognize today's language names (`C++20 (GCC 13-64)`, …).
 - **Coming from the Go tool**: `~/.cf` is copied (not moved), stored login included.
 - `cf parse` fetches a contest's problems in parallel, also parses acmsguru samples, and
   keeps leading spaces in sample lines; the race countdown no longer drifts.

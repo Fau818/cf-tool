@@ -507,7 +507,15 @@ def upgrade() -> None:
     ui.cyan(f"Current version is {__version__}")
     url = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=30"
     try:
-        response = curl_requests.get(url, timeout=10)
+        response = curl_requests.get(
+            url,
+            timeout=10,
+            # GitHub's API refuses requests without a User-Agent
+            headers={
+                "User-Agent": f"cf-tool/{__version__}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
     except Exception as e:
         raise CFError(f"Cannot reach GitHub: {e}") from e
     if response.status_code != 200:

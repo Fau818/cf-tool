@@ -6,7 +6,7 @@ handles the newer markup where each line sits in a
 <div class="test-example-line"> instead of being <br>-separated, and the
 free-form "Sample Input" statements of acmsguru.
 
-Also here: recognising the pages that stand *between* us and Codeforces
+Also here: recognizing the pages that stand *between* us and Codeforces
 (Cloudflare's interstitial, Codeforces' own Turnstile gate).
 """
 

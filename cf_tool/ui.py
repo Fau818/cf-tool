@@ -1,6 +1,6 @@
 """Console output and interactive prompts.
 
-Messages are the Go tool's coloured lines; richer views (tables, panels)
+Messages are the Go tool's colored lines; richer views (tables, panels)
 live in views.py. Every helper here prints text literally — never as Rich
 markup — because it carries foreign text (sample I/O, file names, messages
 from Codeforces) where "[a]" or "[/]" must not be eaten or crash.
@@ -130,8 +130,8 @@ def _ask(question):
         return None
 
 
-def _cancelled(answer) -> None:
-    """Exit when the user cancelled the prompt (answer None)."""
+def _canceled(answer) -> None:
+    """Exit when the user canceled the prompt (answer None)."""
     if answer is None:
         print("\nInterrupted.")
         sys.exit(1)
@@ -219,8 +219,8 @@ def select(
     app.key_bindings = merge_key_bindings([app.key_bindings, escape])
     answer = _ask(question)
     if answer is not None and answer not in [value for _, value in options]:
-        answer = None  # some other key ended the prompt without an item: cancelled
-    _cancelled(answer)
+        answer = None  # some other key ended the prompt without an item: canceled
+    _canceled(answer)
     return answer
 
 
@@ -256,7 +256,7 @@ def text(
     answer = _ask(
         questionary.text(message, default=default, validate=_validate, style=_style(), qmark=_QMARK)
     )
-    _cancelled(answer)
+    _canceled(answer)
     return answer.strip()
 
 
@@ -274,7 +274,7 @@ def path(message: str, *, validate: Validator | None = None) -> str:
     import questionary
 
     answer = _ask(questionary.path(message, validate=validate, style=_style(), qmark=_QMARK))
-    _cancelled(answer)
+    _canceled(answer)
     return answer.strip()
 
 
@@ -297,5 +297,5 @@ def confirm(message: str, *, default: bool = False) -> bool:
             message, default=default, style=_style(), qmark=_QMARK, auto_enter=False
         )
     )
-    _cancelled(answer)
+    _canceled(answer)
     return answer

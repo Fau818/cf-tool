@@ -100,7 +100,7 @@ cf_tool/
 - **questionary quirks** (`ui.select`): it paints the default as "selected" (reverse
   video) — cleared; prompt_toolkit's Meta-Enter (Esc then Enter) submits the menu's
   hidden input line as "" — Esc is bound to cancel and non-item answers count as
-  cancelled.
+  canceled.
 - **Directory model**: `<root>/<type folder>/<contestID>/<problemID>/`, root folder
   name configurable (default `cf`). If no root is found among cwd ancestors, commands
   create `./cf/...` under cwd (Go behavior).
