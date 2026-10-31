@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cf_tool import browser
+from cf_tool.codeforces import browser
 from cf_tool.errors import BrowserUnavailable, CFError, LoginRejected
 
 FIXTURES = Path(__file__).parent / "fixtures"

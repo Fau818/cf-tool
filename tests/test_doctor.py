@@ -1,81 +1,64 @@
-"""cf doctor: each check against fakes, and the command's output and exit code."""
+"""cf doctor's checks: languages, the login, Chrome."""
 
 from types import SimpleNamespace
 
 import pytest
+from click.testing import CliRunner
 
-import cf_tool.config as config_module
-from cf_tool import doctor
-from cf_tool.config import CodeTemplate
+from cf_tool import doctor, paths
 from cf_tool.doctor import ERROR, OK, WARN, Finding
 from cf_tool.errors import CFError, CloudflareChallengeError
+from cf_tool.languages import Machine
+from cf_tool.settings import Settings
 
 LIVE = {"91": "GNU G++23 14.2 (64 bit, msys2)", "70": "PyPy 3.10 (7.3.15, 64bit)"}
+GCC = Machine(
+    which=lambda p: f"/bin/{p}" if p == "g++-14" else None,
+    version=lambda p, f: "g++-14 (GCC) 14.2.0",
+)
+NOTHING = Machine(which=lambda p: None, version=lambda p, f: "", platform="linux")
 
 
-def cpp(tmp_path, **changes) -> CodeTemplate:
-    template_file = tmp_path / "template.cpp"
-    template_file.write_text("int main() {}\n")
-    fields = dict(
-        alias="cpp",
-        lang="91",
-        path=str(template_file),
-        suffix=["cpp"],
-        before_script="g++-14 -std=c++20 -O2 -o $%file%$ $%full%$",
-        script="./$%file%$",
-        after_script="rm $%file%$",
+@pytest.fixture(autouse=True)
+def folders(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "CONFIG_DIR", tmp_path / "config")
+    monkeypatch.setattr(paths, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(paths, "CACHE_DIR", tmp_path / "cache")
+
+
+def settings_with(text: str) -> Settings:
+    path = paths.config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return Settings.load()
+
+
+def test_a_ready_language():
+    (finding,) = doctor.check_language("cpp", Settings(), LIVE, True, GCC)
+    assert finding.level == OK
+    assert finding.text == (
+        "C++: GCC 14 (g++-14), submits as GNU G++23 14.2 (64 bit, msys2), "
+        "starts from the built-in starter"
     )
-    return CodeTemplate(**{**fields, **changes})
 
 
-def installed(*programs: str):
-    return lambda program: f"/usr/bin/{program}" if program in programs else None
+def test_no_compiler():
+    (finding,) = doctor.check_language("cpp", Settings(), LIVE, True, NOTHING)
+    assert finding.level == ERROR and "No C++ compiler" in finding.text
 
 
-def test_a_ready_template(tmp_path):
-    findings = doctor.check_template(cpp(tmp_path), LIVE, True, installed("g++-14", "rm"))
-    assert findings == [Finding(OK, '"cpp": ready, submits as GNU G++23 14.2 (64 bit, msys2)')]
+def test_a_missing_starter_file(tmp_path):
+    settings = settings_with(f'[cpp]\ntemplate = "{tmp_path / "gone.cpp"}"\n')
+    findings = doctor.check_language("cpp", settings, LIVE, True, GCC)
+    assert [f.level for f in findings] == [ERROR] and "doesn't exist" in findings[0].text
 
 
-def test_a_template_checked_without_login(tmp_path):
-    (finding,) = doctor.check_template(cpp(tmp_path), LIVE, False, installed("g++-14", "rm"))
-    assert finding.text.endswith("(not checked: not logged in)")
-
-
-def test_a_broken_template(tmp_path):
-    template = cpp(tmp_path, path=str(tmp_path / "gone.cpp"), lang="89")
-    findings = doctor.check_template(template, LIVE, True, installed("rm"), platform="darwin")
-    assert [(f.level, f.text, f.fix) for f in findings] == [
-        (
-            ERROR,
-            f'"cpp": no template file at {tmp_path / "gone.cpp"}',
-            "cf config, then Add a language, sets it up again",
-        ),
-        (ERROR, '"cpp": g++-14 is not installed', "brew install gcc"),
-        (ERROR, '"cpp": Codeforces no longer offers language 89', "cf submit offers a replacement"),
-    ]
-
-
-def test_interpreters_are_checked_too(tmp_path):
-    template = cpp(
-        tmp_path,
-        alias="py",
-        lang="70",
-        suffix=["py"],
-        before_script="",
-        script="pypy3 $%full%$",
-        after_script="",
-    )
-    (finding,) = doctor.check_template(template, LIVE, True, installed())
-    assert finding.text == '"py": pypy3 is not installed'
-
-
-def test_a_missing_shim(tmp_path, monkeypatch):
-    monkeypatch.setattr(config_module, "CONFIG_DIR", tmp_path / "cf")
-    shim = tmp_path / "cf" / "include"
-    template = cpp(tmp_path, before_script=f"clang++ -I{shim} -o $%file%$ $%full%$")
-    findings = doctor.check_template(template, LIVE, True, installed("clang++", "rm"))
-    assert [f.text for f in findings] == ['"cpp": cf-tool\'s bits/stdc++.h is missing']
+def test_a_language_codeforces_no_longer_offers():
+    settings = settings_with('[cpp]\nsubmit = "54"\n')
+    (finding,) = doctor.check_language("cpp", settings, LIVE, True, GCC)
+    assert finding.level == WARN and "Codeforces doesn't offer 54" in finding.text
+    (unchecked,) = doctor.check_language("cpp", settings, LIVE, False, GCC)
+    assert unchecked.level == OK and "not checked" in unchecked.text
 
 
 def fake_client(home=None, error=None, saved_login=False):
@@ -84,13 +67,10 @@ def fake_client(home=None, error=None, saved_login=False):
             raise error
         return home
 
-    session = SimpleNamespace(
-        handle_or_email="me" if saved_login else "", password="x" if saved_login else ""
-    )
     return SimpleNamespace(
         host="https://codeforces.com",
         gw=SimpleNamespace(get=get),
-        session=session,
+        can_log_in=saved_login,
         languages=lambda: (LIVE, True),
     )
 
@@ -112,7 +92,7 @@ def fake_client(home=None, error=None, saved_login=False):
             False,
         ),
         (fake_client("<html/>", saved_login=True), WARN, "The saved login has expired", False),
-        (fake_client("<html/>"), ERROR, "Not logged in", False),
+        (fake_client("<html/>"), WARN, "Not logged in", False),
     ],
 )
 def test_check_login(client, level, text, logged_in):
@@ -125,29 +105,23 @@ def test_check_chrome():
     assert doctor.check_chrome(lambda: None).level == WARN
 
 
-def test_doctor_command(monkeypatch):
-    from click.testing import CliRunner
-
-    import cf_tool.cli as cli_module
-    from cf_tool.cli import main
+def test_the_doctor_command(monkeypatch):
+    from cf_tool.cli import common, main
 
     findings = [Finding(OK, "all good"), Finding(ERROR, "broken", "fix it like this")]
-    monkeypatch.setattr(cli_module, "_setup", lambda: (None, None))
-    monkeypatch.setattr(doctor, "run", lambda cfg, client: findings)
+    common.reset()
+    monkeypatch.setattr(common, "client", lambda: None)
+    monkeypatch.setattr(doctor, "run", lambda settings, client: findings)
     result = CliRunner().invoke(main, ["doctor"])
     assert result.exit_code == 1
     assert "✓ all good" in result.output and "✗ broken\n    fix it like this" in result.output
 
 
-def test_doctor_reports_a_broken_config(monkeypatch):
-    from click.testing import CliRunner
+def test_a_broken_settings_file_is_a_finding():
+    from cf_tool.cli import common, main
 
-    import cf_tool.cli as cli_module
-    from cf_tool.cli import main
-
-    def broken():
-        raise CFError("Config ~/.config/cf/config is broken (bad JSON). Fix or delete it.")
-
-    monkeypatch.setattr(cli_module, "_setup", broken)
+    paths.config_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text("language = \n")
+    common.reset()
     result = CliRunner().invoke(main, ["doctor"])
-    assert result.exit_code == 1 and "✗ Config ~/.config/cf/config is broken" in result.output
+    assert result.exit_code == 1 and "isn't valid TOML" in result.output

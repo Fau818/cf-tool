@@ -2,49 +2,53 @@
 insists, and the tiered login.
 
 Login tiers (first that works wins):
-  1. HTTP — the Go tool's GET+POST /enter over curl_cffi. Needs no browser,
-     but Cloudflare challenges /enter unless a cf_clearance is still valid.
+  1. HTTP — GET and POST /enter over curl_cffi. Needs no browser, but
+     Cloudflare challenges /enter unless a cf_clearance is still valid.
   2. headless browser — passes the checks without showing anything.
   3. browser window — last resort, for when a human has to tick a box.
 A credentials error (LoginRejected) stops at once, and so does a missing
 Chrome (BrowserUnavailable): another tier would only fail the same way.
 
 Pages are fetched the same way round: HTTP, and only on a challenge a
-headless browser, then a window. Fetches may come from several threads
-(parse, clone); browser work, logins and session saves are serialized by
-one lock, and a login or challenge solved by one thread is reused by the
-others instead of being repeated.
+headless browser, then a window. Browser work, logins and session saves share
+one lock; a login or a check passed once is reused, and a failure is not
+retried within the run.
 """
 
 from __future__ import annotations
 
+import random
 import threading
 from typing import Callable, TypeVar
 from urllib.parse import urlparse
 
-from cf_tool import browser, crypto, pages, templates, ui
-from cf_tool.config import Config
+from cf_tool import ui
+from cf_tool.codeforces import browser, crypto, pages
+from cf_tool.codeforces.http import Transport, is_cloudflare_cookie
+from cf_tool.codeforces.session import Session
 from cf_tool.errors import (
     BrowserUnavailable,
     CFError,
     CloudflareChallengeError,
     LoginRejected,
 )
-from cf_tool.http import Transport, is_cloudflare_cookie
-from cf_tool.session import Session
 
 T = TypeVar("T")
 
 BFAA = "f1b3f18c715565b589b7823cda7448ce"
+LOGIN_COOKIES = ("X-User-Sha1", "X-User")  # NOTE: set only for a logged-in session
+
+
+def _token(n: int) -> str:
+    return "".join(random.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(n))
 
 
 class Gateway:
-    def __init__(self, cfg: Config, session: Session) -> None:
-        self.cfg = cfg
+    def __init__(self, host: str, proxy: str, session: Session) -> None:
+        self.host = host
+        self.proxy = proxy
         self.session = session
-        self.http = Transport(
-            proxy=cfg.proxy, user_agent=session.user_agent, cookies=session.cookies
-        )
+        self.http = Transport(proxy=proxy, user_agent=session.user_agent, cookies=session.cookies)
         self._lock = threading.RLock()
         # bumped by each successful login / challenge solve, so a thread that
         # waited on the lock can tell the work was done meanwhile
@@ -54,10 +58,6 @@ class Gateway:
         # more windows); a fresh `cf` run tries again
         self._login_error: CFError | None = None
         self._solve_error: CFError | None = None
-
-    @property
-    def host(self) -> str:
-        return self.cfg.host
 
     def save(self) -> None:
         with self._lock:
@@ -120,14 +120,15 @@ class Gateway:
             try:
                 solved = self._in_browser(
                     "Cloudflare check",
-                    lambda headless: browser.fetch(url, headless=headless, proxy=self.cfg.proxy),
+                    lambda headless: browser.fetch(url, headless=headless, proxy=self.proxy),
                 )
             except CFError as e:
                 self._solve_error = e
                 raise
-            # merge, not replace: the browser profile is fresh, and dropping
-            # our login cookies here would log the user out
-            self._adopt(solved, replace=False)
+            # NOTE: merged, not replaced; and once logged in, only Cloudflare's
+            # \     cookies: the fresh browser profile's own session is anonymous
+            logged_in = any(self.http.has_cookie(name) for name in LOGIN_COOKIES)
+            self._adopt(solved, replace=False, only_cloudflare=logged_in)
             self._solve_count += 1
             return solved
 
@@ -147,11 +148,16 @@ class Gateway:
         with ui.status(f"{what}: waiting for the browser window..."):
             return run(False)
 
-    def _adopt(self, solved: browser.BrowserSession, replace: bool) -> None:
+    def _adopt(
+        self, solved: browser.BrowserSession, replace: bool, only_cloudflare: bool = False
+    ) -> None:
         with self._lock:
             if replace:
                 self.http.clear_cookies()
-            self.http.adopt_cookies(solved.cookies)
+            cookies = solved.cookies
+            if only_cloudflare:
+                cookies = [c for c in cookies if is_cloudflare_cookie(c["name"])]
+            self.http.adopt_cookies(cookies)
             self.http.set_user_agent(solved.user_agent)
             self.save()
 
@@ -160,7 +166,7 @@ class Gateway:
     def form_tokens(self) -> tuple[str, str]:
         """(ftaa, bfaa) that Codeforces forms expect, created on first use."""
         with self._lock:
-            self.session.ftaa = self.session.ftaa or templates.rand_string(18)
+            self.session.ftaa = self.session.ftaa or _token(18)
             self.session.bfaa = self.session.bfaa or BFAA
             return self.session.ftaa, self.session.bfaa
 
@@ -177,9 +183,9 @@ class Gateway:
         with self._lock:
             session = self.session
             if not session.handle_or_email or not session.password:
-                raise CFError("You have to configure your handle and password by `cf config`")
+                raise CFError("Not logged in: run cf login")
             password = crypto.decrypt_password(session.handle_or_email, session.password)
-            ui.cyan(f"Login {session.handle_or_email}...")
+            ui.cyan(f"Logging in as {session.handle_or_email}...")
             try:
                 with ui.status("Logging in over HTTP..."):
                     handle = self._login_http(password)
@@ -197,8 +203,7 @@ class Gateway:
             self.form_tokens()
             self._login_count += 1
             self.save()
-            ui.green("Succeed!!")
-            ui.green(f"Welcome {handle}~")
+            ui.green(f"Logged in as {handle}")
             return handle
 
     def _relogin(self, seen: int) -> None:
@@ -207,7 +212,7 @@ class Gateway:
                 return  # another thread logged in while this one waited
             if self._login_error is not None:
                 raise self._login_error
-            ui.red("Not logged. Try to login")
+            ui.yellow("The saved login has expired; logging in again")
             try:
                 self.login()
             except CFError as e:
@@ -223,7 +228,7 @@ class Gateway:
         if pages.has_turnstile(body):
             raise CFError("the login form wants a Turnstile check")
         csrf = pages.find_csrf(body)
-        ftaa = templates.rand_string(18)
+        ftaa = _token(18)
         body = self.http.post(
             f"{self.host}/enter",
             data={
@@ -252,7 +257,7 @@ class Gateway:
             self.session.handle_or_email,
             password,
             headless=headless,
-            proxy=self.cfg.proxy,
+            proxy=self.proxy,
         )
         self._adopt(solved, replace=True)
         try:

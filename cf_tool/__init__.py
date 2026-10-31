@@ -1,3 +1,3 @@
-"""cf-tool: Codeforces CLI, a Python port of xalanq/cf-tool."""
+"""cf-tool: Codeforces from your terminal."""
 
 __version__ = "0.3.1"

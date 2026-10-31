@@ -16,8 +16,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from cf_tool.pages import Contest, StatisInfo, Submission
-from cf_tool.problem import Cases
+from cf_tool.codeforces.pages import Contest, ProblemRow, Submission
+from cf_tool.workspace import Cases
 
 LinesAlike = Callable[[str, str], bool]  # (output line, answer line): counts as it?
 
@@ -27,7 +27,7 @@ DIFF_LINES = 40
 
 
 def submission_table(submissions: list[Submission], problem_id: str = "") -> Table:
-    """Recent submissions (the Go tool's `cf watch` table), optionally one problem's."""
+    """Recent submissions (cf status), optionally one problem's."""
     table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
     # long columns may wrap on narrow terminals; the short ones never do
     for column in ("#", "when", "problem", "lang", "status", "time", "memory"):
@@ -49,8 +49,8 @@ def submission_table(submissions: list[Submission], problem_id: str = "") -> Tab
 
 
 def submission_panel(sub: Submission, boxed: bool = True) -> Panel | Table:
-    """Single-submission detail view (the Go tool's display after submit);
-    unboxed, its lines read "status: Accepted" for programs reading them."""
+    """One submission in detail (after cf submit); unboxed, its lines read
+    "status: Accepted" for programs reading them."""
     status, style = sub.styled_status()
     grid = Table.grid(padding=(0, 1))
     grid.add_column(justify="right", style="bold cyan")
@@ -68,8 +68,8 @@ def submission_panel(sub: Submission, boxed: bool = True) -> Panel | Table:
     return Panel(grid, box=box.ROUNDED, border_style=border, expand=False)
 
 
-def problems_table(problems: list[StatisInfo]) -> Table:
-    """A contest's problems (`cf list`): solved rows green, failed ones red."""
+def problems_table(problems: list[ProblemRow]) -> Table:
+    """A contest's problems (cf problems): solved rows green, failed ones red."""
     table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
     for column in ("#", "problem", "passed", "limit", "IO"):
         table.add_column(column, justify="center")

@@ -1,9 +1,13 @@
-"""`cf listen`: receive problems from the Competitive Companion browser
-extension, so samples arrive without cf fetching a Codeforces page.
+"""cf listen: problems from the Competitive Companion browser extension, so
+the samples arrive without cf-tool fetching a Codeforces page.
 
-The extension sends each problem as JSON (POST /) to localhost on a fixed
+The extension sends each problem as JSON (a POST to localhost) to a fixed
 list of ports (its src/hosts/hosts.ts); cf takes one of them. A contest
-comes as a batch: one POST per problem, each knowing the batch's size."""
+comes as a batch: one POST per problem, each knowing the batch's size. Only
+the extension is listened to: a request from a web page (it carries an
+Origin) or one that isn't JSON is turned away, and so is a page that isn't
+a Codeforces problem.
+"""
 
 from __future__ import annotations
 
@@ -14,41 +18,55 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from cf_tool import templates, ui
-from cf_tool.args import Info, parse_args
-from cf_tool.config import Config
+from cf_tool import ui
 from cf_tool.errors import CFError
-from cf_tool.problem import ProblemInfo
+from cf_tool.workspace import (
+    ProblemInfo,
+    Target,
+    parse_target,
+    problem_folder,
+    read_spec,
+    save_info,
+    save_samples,
+)
 
 DEFAULT_PORT = 4244  # NOTE: Hightail's, a tool gone quiet; the extension still sends there
+REQUEST_TIMEOUT = 5.0  # seconds a connection gets to send its problem
+MAX_BODY = 16 * 1024 * 1024  # bytes
+
+# what to do with a problem once its folder is written: (folder, target, info)
+OnProblem = Callable[[Path, Target, ProblemInfo], None]
 
 
-def save_problem(data: dict, cfg: Config, cwd: Path) -> tuple[Info, int]:
-    """Write a received problem's samples and info into its folder, as cf
-    parse would; returns (where it went, the number of samples)."""
+def save_problem(data: dict, root: Path) -> tuple[Path, Target, ProblemInfo, int]:
+    """Write a received problem's tests and info into its folder under root,
+    as cf get would; returns (its folder, the problem, its info, the number
+    of tests). Raises CFError for what isn't a Codeforces problem."""
     url = str(data.get("url", ""))
     host = urlparse(url).hostname or ""
     if host != "codeforces.com" and not host.endswith(".codeforces.com"):
         raise CFError(f"Not a Codeforces problem: {url or data.get('name', '?')}")
-    info = parse_args([url], cwd, cfg)
-    folder = info.path()
-    folder.mkdir(parents=True, exist_ok=True)
-    tests = [t for t in data.get("tests", []) if isinstance(t, dict)]
-    for i, test in enumerate(tests, start=1):
-        (folder / f"in{i}.txt").write_text(str(test.get("input", "")), encoding="utf-8", newline="")
-        (folder / f"ans{i}.txt").write_text(
-            str(test.get("output", "")), encoding="utf-8", newline=""
-        )
-    limit = data.get("timeLimit")
-    memory = data.get("memoryLimit")
-    ProblemInfo(
+    parsed = read_spec(url)
+    if not parsed or not parsed.get("problem"):
+        raise CFError(f"Not a Codeforces problem's page: {url}")
+    target = parse_target([url])
+    folder = problem_folder(root, target)
+    tests = [
+        (str(test.get("input", "")), str(test.get("output", "")))
+        for test in data.get("tests", [])
+        if isinstance(test, dict)
+    ]
+    save_samples(folder, tests)
+    limit, memory = data.get("timeLimit"), data.get("memoryLimit")
+    info = ProblemInfo(
         name=str(data.get("name", "")),
         url=url,
         time_limit=limit / 1000 if isinstance(limit, (int, float)) else None,  # NOTE: sent in ms
         memory_limit=int(memory) if isinstance(memory, (int, float)) else None,
         interactive=bool(data.get("interactive", False)),
-    ).save(folder)
-    return info, len(tests)
+    )
+    save_info(folder, info)
+    return folder, target, info, len(tests)
 
 
 class _Server(HTTPServer):
@@ -60,28 +78,43 @@ class _Server(HTTPServer):
 
 
 class _Handler(BaseHTTPRequestHandler):
+    timeout = REQUEST_TIMEOUT  # NOTE: a connection that sends nothing can't hold up the next
+
     def do_POST(self) -> None:
-        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        self.send_response(200)
-        self.end_headers()
+        origin = self.headers.get("Origin", "")
+        length = self.headers.get("Content-Length") or "0"
+        if origin.startswith(("http://", "https://")):
+            self._answer(403)  # NOTE: a web page, not the extension
+            return
+        if "json" not in self.headers.get("Content-Type", "").lower():
+            self._answer(415)
+            return
+        if not length.isdigit() or int(length) > MAX_BODY:
+            self._answer(413)
+            return
+        body = self.rfile.read(int(length))
+        self._answer(200)
         self.server.received.append(body)  # type: ignore[attr-defined]
+
+    def _answer(self, status: int) -> None:
+        self.send_response(status)
+        self.end_headers()
 
     def log_message(self, format, *args) -> None:  # noqa: A002 (the base class's name)
         pass  # NOTE: no request log on the terminal
 
 
 def listen(
-    cfg: Config,
-    cwd: Path,
-    handle: str,
+    root: Path,
+    on_problem: OnProblem | None = None,
     port: int = DEFAULT_PORT,
     keep: bool = False,
     ready: Callable[[int], None] | None = None,
 ) -> None:
-    """Receive problems on localhost:port and save each; returns once a
-    whole batch (a contest, or a single problem) arrived, unless keep.
-    ready(port) is called once listening."""
-    code = templates.default_code(cfg, handle) if cfg.gen_after_parse else None
+    """Receive problems on localhost:port, save each under root and pass it
+    to on_problem (the starter code); returns once a whole batch (a contest,
+    or a single problem) arrived, unless keep. ready(port) is called once
+    listening."""
     try:
         server = _Server(("127.0.0.1", port), _Handler)
     except OSError as e:
@@ -100,32 +133,30 @@ def listen(
         while True:
             server.handle_request()
             for body in server.received:  # type: ignore[attr-defined]
-                done = _receive(body, cfg, cwd, code, batches)
-                if done and not keep:
+                if _receive(body, root, on_problem, batches) and not keep:
                     return
             server.received.clear()  # type: ignore[attr-defined]
 
 
 def _receive(
-    body: bytes, cfg: Config, cwd: Path, code: tuple[str, str] | None, batches: dict[str, set[str]]
+    body: bytes, root: Path, on_problem: OnProblem | None, batches: dict[str, set[str]]
 ) -> bool:
     """Save one received problem and say so; returns whether its batch is now complete."""
     try:
         data = json.loads(body)
-        info, count = save_problem(data, cfg, cwd)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+        folder, target, info, count = save_problem(data, root)
     except (ValueError, TypeError, AttributeError) as e:
         ui.red(f"Received something that isn't a problem ({e})")
         return False
     except CFError as e:
         ui.red(str(e))
         return False
-    if code is not None:
-        templates.generate_file(code[0], info.path(), code[1])
-    noun = "sample" if count == 1 else "samples"
-    ui.line(
-        (f"Parsed {info.contest_id}{info.problem_id.upper()} with {count} {noun}", "green"),
-        (f" into {info.path()}", ""),
-    )
+    if on_problem is not None:
+        on_problem(folder, target, info)
+    noun = "test" if count == 1 else "tests"
+    ui.line((f"{target.label}", "bold green"), (f"  {info.name}  {count} {noun} in {folder}", ""))
     batch = data.get("batch") if isinstance(data.get("batch"), dict) else {}
     seen = batches.setdefault(str(batch.get("id", "")), set())
     seen.add(str(data.get("url", "")))

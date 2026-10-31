@@ -1,20 +1,20 @@
-"""`cf doctor`: check the setup and say how to fix what's wrong, changing
+"""cf doctor: check the setup and say how to fix what's wrong, changing
 nothing. It checks, in this order:
-- each template: its file, the programs its scripts run, its language
+- the settings file
+- each language that matters (the one for starter code, those set in
+  config.toml): its compiler, its starter file, what it submits as
 - the login, over plain HTTP (no browser)
 - Chrome, needed when Cloudflare checks the login"""
 
 from __future__ import annotations
 
-import shutil
-import sys
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 
-from cf_tool import browser, judge, langs, pages, presets, templates
-from cf_tool.config import CodeTemplate, Config
+from cf_tool import languages
+from cf_tool.codeforces import browser, pages
 from cf_tool.errors import CFError, CloudflareChallengeError
+from cf_tool.settings import Settings
 
 OK, WARN, ERROR = "ok", "warn", "error"
 
@@ -26,65 +26,48 @@ class Finding:
     fix: str = ""  # how to put it right
 
 
-def _programs(template: CodeTemplate) -> list[str]:
-    """The installed programs a template's scripts start (not the one it builds)."""
-    subs = {"path": "", "full": f"a.{(template.suffix or ['txt'])[0]}", "file": "a", "rand": "x"}
-    found = []
-    for script in (template.before_script, template.script, template.after_script):
-        words = judge.split_cmd(templates.substitute_script(script, **subs))
-        if words and not any(sep in words[0] for sep in "/\\"):  # NOTE: ./a was just built
-            found.append(words[0])
-    return list(dict.fromkeys(found))
-
-
-def check_template(
-    template: CodeTemplate,
-    languages: dict[str, str],
+def check_language(
+    key: str,
+    settings: Settings,
+    offered: Mapping[str, str],
     live: bool,
-    which: Callable[[str], "str | None"] = shutil.which,
-    platform: str = sys.platform,
+    machine: languages.Machine | None = None,
 ) -> list[Finding]:
-    """What's wrong with one template; all good: one OK. Errors:
-    - its template file is missing
-    - a program its scripts start isn't installed (with how to install it)
-    - Codeforces doesn't offer its language (checked when logged in)
-    - cf-tool's bits/stdc++.h, which it compiles with, is missing"""
-    name = f'"{template.alias}"'
-    preset = presets.family_of(template, languages)
+    """What's wrong with one language; all good: one OK. Errors: no
+    compiler, a missing starter file; a warning: Codeforces doesn't offer
+    the language it is set to submit as (checked when logged in)."""
+    name = languages.display_name(key)
+    try:
+        setup = languages.setup(key, settings, offered=offered, machine=machine)
+    except CFError as e:
+        return [Finding(ERROR, f"{name}: {e}")]
     findings = []
-    if not Path(template.path).expanduser().is_file():
+    try:
+        _, origin = languages.starter(key, settings)
+    except CFError as e:
+        findings.append(Finding(ERROR, f"{name}: {e}", f"fix template in [{key}] of config.toml"))
+        origin = ""
+    if setup.submit is None:
+        wanted = settings.language_settings(key).submit or name
+        level = WARN if live else OK
         findings.append(
             Finding(
-                ERROR,
-                f"{name}: no template file at {template.path or '(none set)'}",
-                "cf config, then Add a language, sets it up again",
-            )
-        )
-    for program in _programs(template):
-        if which(program) is None:
-            hint = preset.install_hint(platform) if preset else f"install {program}"
-            findings.append(Finding(ERROR, f"{name}: {program} is not installed", hint))
-    if live and template.lang not in languages:
-        findings.append(
-            Finding(
-                ERROR,
-                f"{name}: Codeforces no longer offers language {template.lang}",
-                "cf submit offers a replacement",
-            )
-        )
-    shim = presets.shim_folder()
-    if str(shim) in template.before_script and not (shim / "bits" / "stdc++.h").is_file():
-        findings.append(
-            Finding(
-                ERROR,
-                f"{name}: cf-tool's bits/stdc++.h is missing",
-                "cf config, then Add a language, C++, writes it again",
+                level,
+                f"{name}: Codeforces doesn't offer {wanted}"
+                + ("" if live else " (not checked: not logged in)"),
+                "cf submit lets you pick another" if live else "",
             )
         )
     if not findings:
-        language = languages.get(template.lang) or f"language {template.lang}"
-        unchecked = "" if live else " (not checked: not logged in)"
-        findings.append(Finding(OK, f"{name}: ready, submits as {language}{unchecked}"))
+        starter = "the built-in starter" if origin == "built-in" else origin
+        unchecked = "" if live else " (the list isn't checked: not logged in)"
+        findings.append(
+            Finding(
+                OK,
+                f"{name}: {setup.tool}, submits as {setup.submit[1] if setup.submit else '?'}, "
+                f"starts from {starter}{unchecked}",
+            )
+        )
     return findings
 
 
@@ -108,12 +91,12 @@ def check_login(client) -> tuple[Finding, bool]:
     handle = pages.find_handle(body)
     if handle:
         return Finding(OK, f"Logged in as {handle}"), True
-    if client.session.handle_or_email and client.session.password:
+    if client.can_log_in:
         finding = Finding(
             WARN, "The saved login has expired", "the next command that needs it logs in again"
         )
         return finding, False
-    return Finding(ERROR, "Not logged in", "cf config, then Login"), False
+    return Finding(WARN, "Not logged in", "cf login (cf submit also asks when it needs to)"), False
 
 
 def check_chrome(find: Callable[[], "str | None"] = browser.find_chrome) -> Finding:
@@ -128,13 +111,14 @@ def check_chrome(find: Callable[[], "str | None"] = browser.find_chrome) -> Find
     )
 
 
-def run(cfg: Config, client) -> list[Finding]:
+def run(settings: Settings, client) -> list[Finding]:
     """Every finding, in the order cf doctor prints them."""
+    findings = [Finding(WARN, warning, "fix it in config.toml") for warning in settings.warnings]
     login, logged_in = check_login(client)
-    languages, live = client.languages() if logged_in else (langs.LANGS, False)
-    findings = []
-    if not cfg.template:
-        findings.append(Finding(ERROR, "No language set up", "cf config"))
-    for template in cfg.template:
-        findings += check_template(template, languages, live)
+    offered, live = client.languages() if logged_in else (languages.known_languages(), False)
+    keys = list(dict.fromkeys([settings.language or "cpp", *settings.languages]))
+    if not settings.language:
+        findings.append(Finding(OK, "No language picked yet: cf get asks for one"))
+    for key in keys:
+        findings += check_language(key, settings, offered, live)
     return findings + [login, check_chrome()]

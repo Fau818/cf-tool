@@ -1,10 +1,8 @@
 """All Codeforces HTML/JSON parsing in one place (regexes + BeautifulSoup).
 
-Function names and regexes follow the Go client (findHandle, findCsrf, ...)
-so behavior can be diffed against the original. Sample extraction also
-handles the newer markup where each line sits in a
-<div class="test-example-line"> instead of being <br>-separated, and the
-free-form "Sample Input" statements of acmsguru.
+Samples come in the classic markup (lines split by <br>), the newer one
+(a <div class="test-example-line"> per line), and acmsguru's free-form
+"Sample Input" statements.
 
 Also here: recognizing the pages that stand *between* us and Codeforces
 (Cloudflare's interstitial, Codeforces' own Turnstile gate).
@@ -39,9 +37,8 @@ _UTC_OFFSET_RE = re.compile(r'name="utc_offset" content="([\s\S]+?)"')
 _TAG_RE = re.compile(r"<[^>]+>")
 _NUM_RE = re.compile(r"\d+")
 
-# the Go tool matched one exact <div> string; Codeforces has since added
-# extra classes and the wording varies by problem age ("standard input" on
-# newer pages, "stdin" on older ones), so match loosely
+# Codeforces has added classes over time, and the wording varies by problem
+# age ("standard input" on newer pages, "stdin" on older ones): match loosely
 _STANDARD_INPUT_RE = re.compile(
     r'class="input-file input-standard"|'
     r'class="input-file[^"]*"><div class="property-title">input</div>\s*(standard input|stdin)<'
@@ -96,6 +93,11 @@ def require_handle(body: str) -> str:
     return handle
 
 
+def wants_login(body: str) -> bool:
+    """Whether the page is the login form (a page Codeforces shows only once logged in)."""
+    return 'name="handleOrEmail"' in body or 'id="enterForm"' in body
+
+
 def find_csrf(body: str) -> str:
     match = _CSRF_RE.search(body) or _CSRF_DATA_RE.search(body)
     if not match:
@@ -108,11 +110,11 @@ def _pre_to_text(inner: str) -> str:
     markup and the newer one-<div>-per-line markup."""
     if "test-example-line" in inner:
         lines = re.findall(r"<div[^>]*>([\s\S]*?)</div>", inner)
-        # only the whole text is trimmed (as Go does): leading spaces inside
+        # only the whole text is trimmed: leading spaces inside
         # a line can be part of the input, e.g. ASCII-art grids
         text = "\n".join(html_lib.unescape(_TAG_RE.sub("", line)) for line in lines)
         return text.strip() + "\n"
-    text = re.sub(r"<[\s/br]+?>", "\n", inner)  # the Go tool's <br> normalizer
+    text = re.sub(r"<[\s/br]+?>", "\n", inner)  # <br> in all its spellings
     text = _TAG_RE.sub("", text)
     return html_lib.unescape(text).strip() + "\n"
 
@@ -145,8 +147,12 @@ _SAMPLE_LINE_RE = re.compile(
 
 
 _ANY_CASE_RE = re.compile(
-    r"in any (?:letter )?case|any letter case|case[- ]insensitive|в любом регистре", re.IGNORECASE
+    r"any letter case|case[- ]insensitive|в любом регистре|in any (?:letter )?case(?!\s*,)",
+    re.IGNORECASE,
 )
+# "in any case" means letter case only after words about printing ("In any
+# case, ..." is the other "in any case")
+_PRINTING_RE = re.compile(r"print|output|letter|answer|string|word|yes|no\b", re.IGNORECASE)
 _ERROR_RE = re.compile(
     r"(?:(?:absolute|relative)\s+(?:or\s+(?:absolute|relative)\s+)?(?:error|precision)|погрешност)"
     r"[^.]{0,160}?(?:10\s*(?:\^\s*\{?|\s)\s*[-−]\s*(\d+)|\b1\s*[eE]\s*[-−]\s*(\d+))",
@@ -174,6 +180,16 @@ def _statement_text(body: str) -> str:
     return re.sub(r"\s+", " ", html_lib.unescape(_TAG_RE.sub(" ", statement)))
 
 
+def _accepts_any_case(statement: str) -> bool:
+    """Whether the statement accepts answers in any letter case."""
+    for match in _ANY_CASE_RE.finditer(statement):
+        if not match.group().lower().startswith("in any"):
+            return True
+        if _PRINTING_RE.search(statement[max(0, match.start() - 80) : match.start()]):
+            return True
+    return False
+
+
 def find_problem_header(body: str) -> ProblemHeader:
     """A problem page's title, limits, whether it is interactive, and how
     lenient its checker is by the statement (a limit the page doesn't show,
@@ -188,7 +204,7 @@ def find_problem_header(body: str) -> ProblemHeader:
         time_limit=float(time_limit.group(1)) if time_limit else None,
         memory_limit=int(memory_limit.group(1)) if memory_limit else None,
         interactive=bool(_INTERACTION_RE.search(body)),
-        ignore_case=bool(_ANY_CASE_RE.search(statement)),
+        ignore_case=_accepts_any_case(statement),
         epsilon=10.0 ** -int(error.group(1) or error.group(2)) if error else None,
     )
 
@@ -220,6 +236,22 @@ def find_sample_cases(body: str) -> list[tuple[list[int], list[int]] | None]:
             None if input_cases is None or answer_cases is None else (input_cases, answer_cases)
         )
     return found
+
+
+_HOLDER_RE = re.compile(r'<div class="problemindexholder" problemindex="(\w+)"')
+
+
+def split_problems(body: str) -> list[tuple[str, str]]:
+    """A contest's all-problems page (/problems) as (index, that problem's
+    part of the page), in order; [] when it isn't one."""
+    starts = list(_HOLDER_RE.finditer(body))
+    return [
+        (
+            match.group(1),
+            body[match.start() : (starts[i + 1].start() if i + 1 < len(starts) else len(body))],
+        )
+        for i, match in enumerate(starts)
+    ]
 
 
 def is_standard_io(body: str) -> bool:
@@ -267,7 +299,7 @@ def find_cf_offset(body: str) -> str:
 
 
 @dataclass
-class StatisInfo:
+class ProblemRow:
     id: str
     name: str
     io: str
@@ -276,7 +308,7 @@ class StatisInfo:
     state: str  # tr class, e.g. "accepted-problem" / "rejected-problem" / ""
 
 
-def parse_problems(body: str) -> list[StatisInfo]:
+def parse_problems(body: str) -> list[ProblemRow]:
     soup = BeautifulSoup(body, "lxml")
     table = soup.find("table", class_="problems")
     if table is None:
@@ -303,7 +335,7 @@ def parse_problems(body: str) -> list[StatisInfo]:
             if digits:
                 passed = digits.group(0)
         problems.append(
-            StatisInfo(
+            ProblemRow(
                 id=problem_id,
                 name=name,
                 io=io_text,
@@ -339,7 +371,7 @@ _WAIT_VERDICTS = ("null", "TESTING", "SUBMITTED")
 _VERDICT_FORMAT_RE = re.compile(r"<span\sclass=[\"']?verdict-format-[^\"'>]+[\"']?>")
 _VERDICT_COLOR_RE = re.compile(r"<span\sclass=[\"']?verdict-([^\"'>]+?)[\"']?>")
 
-# ${c-...} marker -> rich style (the Go tool's colorMap)
+# ${c-...} marker -> rich style
 STATUS_STYLE = {
     "${c-waiting}": "white",
     "${c-failed}": "red",
@@ -353,7 +385,7 @@ class Submission:
     id: int = 0
     name: str = ""
     lang: str = ""
-    status: str = ""  # contains ${c-...}/${f-...} markers like the Go tool
+    status: str = ""  # with ${c-...}/${f-...} markers for its color and numbers
     time_ms: int = 0
     memory_bytes: int = 0
     when: str = ""

@@ -1,9 +1,9 @@
 """Console output and interactive prompts.
 
-Messages are the Go tool's colored lines; richer views (tables, panels)
-live in views.py. Every helper here prints text literally — never as Rich
-markup — because it carries foreign text (sample I/O, file names, messages
-from Codeforces) where "[a]" or "[/]" must not be eaten or crash.
+Messages are colored lines; richer views (tables, panels) live in views.py.
+Every helper here prints text literally, never as Rich markup, because it
+carries foreign text (sample I/O, file names, messages from Codeforces)
+where "[a]" or "[/]" must not be eaten or crash.
 
 Prompts use questionary for arrow-key selection / fuzzy filtering / inline
 validation when attached to a terminal, and fall back to plain typed input
@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.errors import LiveError
 from rich.text import Text
 
-console = Console(highlight=False)
+console = Console(highlight=False, emoji=False)  # NOTE: ":x:" in a sample is text
 
 T = TypeVar("T")
 
@@ -56,6 +56,10 @@ def yellow(message: str) -> None:
 
 def plain(message: str) -> None:
     console.print(message, markup=False)
+
+
+def dim(message: str) -> None:
+    console.print(message, style="dim", markup=False)
 
 
 def line(*parts: tuple[str, str]) -> None:

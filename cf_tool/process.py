@@ -330,8 +330,19 @@ def run(
         raise
     out.join(_GRACE)
     err.join(_GRACE)
+    return _result(child, finished, out, err, timeout, output_limit)
+
+
+def _result(
+    child: Child,
+    finished: bool,
+    out: _Reader | None,
+    err: _Reader,
+    timeout: float | None,
+    output_limit: int = OUTPUT_LIMIT,
+) -> Result:
     code = child.process.returncode
-    if out.exceeded:
+    if out is not None and out.exceeded:
         status = OUTPUT
     elif not finished:
         status = TIMEOUT
@@ -344,11 +355,77 @@ def run(
     return Result(
         status=status,
         code=code,
-        stdout=out.data(),
+        stdout=out.data() if out is not None else b"",
         stderr=err.data(),
         cpu=child.cpu if child.cpu is not None else child.wall,
         wall=child.wall,
         memory=child.memory,
         timeout=timeout,
         output_limit=output_limit,
+    )
+
+
+def interact(
+    solution: Sequence[str],
+    interactor: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: float,
+    solution_cwd: Path | None = None,
+    big_stack: bool = False,
+) -> tuple[Result, Result]:
+    """Run a solution against an interactor, each one's output the other's
+    input; returns (the solution's result, the interactor's). Steps:
+    - start both, wired together
+    - wait for both to end, at most timeout seconds
+    - once the interactor has ended (its verdict is in), give the solution a
+      moment to end too, then stop it"""
+    to_solution = os.pipe()
+    to_interactor = os.pipe()
+    try:
+        solver = Child(
+            solution,
+            cwd=solution_cwd or cwd,
+            stdin=to_solution[0],
+            stdout=to_interactor[1],
+            stderr=subprocess.PIPE,
+            big_stack=big_stack,
+        )
+        try:
+            judge = Child(
+                interactor,
+                cwd=cwd,
+                stdin=to_interactor[0],
+                stdout=to_solution[1],
+                stderr=subprocess.PIPE,
+            )
+        except BaseException:
+            solver.kill()
+            raise
+    finally:
+        for fd in (*to_solution, *to_interactor):
+            os.close(fd)  # NOTE: only the two programs hold the pipes now
+    solver_err = _Reader(solver.process.stderr, tail=STDERR_KEPT)
+    judge_err = _Reader(judge.process.stderr, tail=STDERR_KEPT)
+    deadline = time.monotonic() + timeout
+    try:
+        while not (solver.done.is_set() and judge.done.is_set()):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            if judge.done.is_set():
+                solver.done.wait(min(left, _GRACE))  # NOTE: the verdict is in
+                break
+            judge.done.wait(min(left, 0.05))
+    finally:
+        solver_done, judge_done = solver.done.is_set(), judge.done.is_set()
+        for child in (solver, judge):
+            if not child.done.is_set():
+                child.kill()
+                child.done.wait(_GRACE)
+    solver_err.join(_GRACE)
+    judge_err.join(_GRACE)
+    return (
+        _result(solver, solver_done, None, solver_err, timeout),
+        _result(judge, judge_done, None, judge_err, timeout),
     )

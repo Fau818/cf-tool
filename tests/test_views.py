@@ -55,7 +55,7 @@ def test_contest_times():
 
 
 def test_calendar_file():
-    from cf_tool.pages import Contest
+    from cf_tool.codeforces.pages import Contest
 
     contests = [Contest(2278, "Round 1131 (Div. 3); rated, sure", 1793457300, 8100, "BEFORE")]
     ics = views.to_ics(contests, "https://codeforces.com", now=1793400000)
@@ -71,7 +71,7 @@ def test_calendar_file():
 
 
 def test_calendar_lines_are_folded():
-    from cf_tool.pages import Contest
+    from cf_tool.codeforces.pages import Contest
 
     ics = views.to_ics([Contest(1, "x" * 200, 0, 60, "BEFORE")], "https://codeforces.com", 0)
     assert all(len(line) <= 75 for line in ics.split("\r\n"))
@@ -79,7 +79,7 @@ def test_calendar_lines_are_folded():
 
 
 def test_submission_lines_for_a_pipe():
-    from cf_tool.pages import Submission
+    from cf_tool.codeforces.pages import Submission
 
     sub = Submission(
         id=42, name="D - Soldier", lang="GNU G++23", status="${c-accepted}Accepted", end=True

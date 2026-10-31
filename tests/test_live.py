@@ -3,7 +3,7 @@ parsers? Opt-in: `uv run pytest -m live`.
 
 Public pages only, fetched over plain HTTP the way cf fetches them: no login,
 no session, nothing submitted, at most one request a second. The expected
-values match the trimmed copies in tests/fixtures/ (taken 2026-10-12).
+values match the trimmed copies in tests/fixtures/ (taken 2026-10-12 and 31).
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ import time
 import pytest
 from curl_cffi import requests as curl_requests
 
-from cf_tool import langs, pages
-from cf_tool.http import IMPERSONATE, TIMEOUT, is_challenge
+from cf_tool import languages as langs
+from cf_tool.codeforces import pages
+from cf_tool.codeforces.http import IMPERSONATE, TIMEOUT, is_challenge
 
 pytestmark = pytest.mark.live
 
@@ -126,3 +127,12 @@ def test_statement_tolerance():
     assert pages.find_problem_header(
         fetch("/problemset/problem/2000/A", "problem-statement")
     ).ignore_case
+
+
+def test_every_problem_of_a_contest_in_one_page():
+    page = fetch("/contest/2171/problems", "problemindexholder")
+    parts = pages.split_problems(page)
+    assert [index for index, _ in parts] == ["A", "B", "C1", "C2", "D", "E", "F", "G", "H"]
+    first = parts[0][1]
+    assert pages.find_problem_header(first).name == "A. Shizuku Hoshikawa and Farm Legs"
+    assert pages.find_samples(first) == (["5\n2\n3\n4\n6\n100\n"], ["1\n0\n2\n2\n26\n"])

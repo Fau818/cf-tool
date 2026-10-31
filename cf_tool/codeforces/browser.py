@@ -17,9 +17,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 from urllib.parse import urlparse
 
-from cf_tool import pages
+from cf_tool.codeforces import pages
+from cf_tool.codeforces.http import CookieDict
 from cf_tool.errors import BrowserError, BrowserUnavailable, CFError, LoginRejected
-from cf_tool.http import CookieDict
 
 T = TypeVar("T")
 
@@ -164,17 +164,27 @@ def _launch(headless: bool, proxy: str):
 
     try:
         page = ChromiumPage(options())
-        if headless:
-            user_agent = page.run_js(_JS_USER_AGENT) or ""
-            if "HeadlessChrome" in user_agent:
-                # cf_clearance is UA-bound: present a normal-Chrome UA from the start
-                page.quit()
-                page = ChromiumPage(options(user_agent.replace("HeadlessChrome", "Chrome")))
-        return page
     except Exception as e:
         raise BrowserUnavailable(
             f"cannot start Chrome ({_first_line(e)}). Is Google Chrome or Chromium installed?"
         ) from e
+    if not headless:
+        return page
+    try:
+        user_agent = page.run_js(_JS_USER_AGENT) or ""
+        if "HeadlessChrome" not in user_agent:
+            return page
+        # NOTE: cf_clearance is bound to the UA: show a normal Chrome's from the start
+        page.quit()
+        page = None
+        return ChromiumPage(options(user_agent.replace("HeadlessChrome", "Chrome")))
+    except Exception as e:
+        if page is not None:
+            try:
+                page.quit()
+            except Exception:
+                pass
+        raise BrowserError(f"the headless browser failed to start ({_first_line(e)})") from e
 
 
 def _first_line(e: Exception) -> str:

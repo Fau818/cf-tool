@@ -9,16 +9,15 @@ import time
 
 import pytest
 
-from cf_tool import crypto, gateway
-from cf_tool.browser import BrowserSession
-from cf_tool.config import Config
+from cf_tool.codeforces import crypto, gateway
+from cf_tool.codeforces.browser import BrowserSession
+from cf_tool.codeforces.session import Session
 from cf_tool.errors import (
     BrowserUnavailable,
     CFError,
     CloudflareChallengeError,
     LoginRejected,
 )
-from cf_tool.session import Session
 
 HOST = "https://codeforces.com"
 LOGGED_IN = '<script>var handle = "tourist";</script>'
@@ -72,6 +71,9 @@ class FakeTransport:
         if user_agent:
             self.user_agent = user_agent
 
+    def has_cookie(self, name):
+        return any(c["name"] == name for c in self.cookies)
+
 
 def cookie(name, value="v"):
     return {"name": name, "value": value, "domain": "codeforces.com", "path": "/"}
@@ -80,7 +82,7 @@ def cookie(name, value="v"):
 def make_gateway(tmp_path, transport, password="secret"):
     session = Session(tmp_path / "session", handle_or_email="tourist")
     session.password = crypto.encrypt_password("tourist", password)
-    gw = gateway.Gateway(Config(), session)
+    gw = gateway.Gateway(HOST, "", session)
     gw.http = transport
     return gw
 
@@ -225,8 +227,8 @@ def test_turnstile_on_the_form_skips_the_http_post(tmp_path, monkeypatch):
 
 
 def test_login_without_credentials(tmp_path):
-    gw = gateway.Gateway(Config(), Session(tmp_path / "session"))
-    with pytest.raises(CFError, match="cf config"):
+    gw = gateway.Gateway(HOST, "", Session(tmp_path / "session"))
+    with pytest.raises(CFError, match="cf login"):
         gw.login()
 
 
@@ -312,3 +314,18 @@ def test_failed_relogin_is_not_repeated_by_other_threads(tmp_path, monkeypatch):
         with pytest.raises(LoginRejected):
             gw.get_authed(url)
     assert attempts == [True]
+
+
+def test_a_solve_once_logged_in_takes_only_cloudflare_cookies(tmp_path, monkeypatch):
+    # NOTE: the browser's fresh profile has an anonymous session of its own
+    url = f"{HOST}/contest/4"
+    answers = iter([CloudflareChallengeError, "content"])
+    transport = FakeTransport(gets={url: lambda: next(answers)})
+    transport.cookies = [cookie("X-User-Sha1", "me"), cookie("JSESSIONID", "logged-in")]
+    anonymous = [cookie("JSESSIONID", "anonymous"), cookie("cf_clearance", "new")]
+    fake_browser(monkeypatch, fetch=lambda headless: browser_session(cookies=anonymous))
+    gw = make_gateway(tmp_path, transport)
+
+    assert gw.get(url) == "content"
+    values = {c["name"]: c["value"] for c in transport.cookies}
+    assert values == {"X-User-Sha1": "me", "JSESSIONID": "logged-in", "cf_clearance": "new"}

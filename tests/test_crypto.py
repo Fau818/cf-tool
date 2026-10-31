@@ -2,7 +2,7 @@
 
 import pytest
 
-from cf_tool.crypto import decrypt_password, encrypt_password
+from cf_tool.codeforces.crypto import decrypt_password, encrypt_password
 from cf_tool.errors import CFError
 
 

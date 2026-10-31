@@ -410,6 +410,8 @@ def _is(folder: Path, target: Target) -> bool:
 
 @dataclass(frozen=True)
 class Test:
+    __test__ = False  # NOTE: not a test class, to pytest
+
     name: str  # "1", "my", "stress-17"
     input: Path
     answer: Path | None  # None: a test that is only run

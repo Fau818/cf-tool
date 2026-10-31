@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from cf_tool.errors import CFError
-from cf_tool.pages import (
+from cf_tool.codeforces.pages import (
     find_code,
     find_countdown,
     find_csrf,
@@ -358,7 +358,7 @@ def test_is_captcha_error():
 
 
 def test_problem_header():
-    from cf_tool.pages import ProblemHeader, find_problem_header
+    from cf_tool.codeforces.pages import ProblemHeader, find_problem_header
 
     assert find_problem_header(fixture("problem_4a.html")) == ProblemHeader(
         "A. Watermelon", 1.0, 64, False
@@ -369,7 +369,7 @@ def test_problem_header():
 
 
 def test_sample_cases():
-    from cf_tool.pages import find_sample_cases
+    from cf_tool.codeforces.pages import find_sample_cases
 
     assert find_sample_cases(fixture("problem_2171a.html")) == [
         ([0, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5])  # NOTE: line 0 gives the number of cases
@@ -378,7 +378,7 @@ def test_sample_cases():
 
 
 def test_sample_cases_follow_the_trimmed_text():
-    from cf_tool.pages import find_sample_cases, find_samples
+    from cf_tool.codeforces.pages import find_sample_cases, find_samples
 
     line = '<div class="test-example-line test-example-line-{}">{}</div>'
     body = (
@@ -395,7 +395,7 @@ def test_sample_cases_follow_the_trimmed_text():
 
 
 def test_statement_tolerance():
-    from cf_tool.pages import find_problem_header
+    from cf_tool.codeforces.pages import find_problem_header
 
     assert (
         find_problem_header(fixture("epsilon_808b.html")).epsilon == 1e-6
@@ -415,7 +415,7 @@ def test_statement_tolerance():
 
 
 def test_parse_contests():
-    from cf_tool.pages import Contest, parse_contests
+    from cf_tool.codeforces.pages import Contest, parse_contests
 
     result = [
         {
@@ -428,3 +428,35 @@ def test_parse_contests():
         {"id": 9, "name": "No start time yet", "phase": "BEFORE"},
     ]
     assert parse_contests(result) == [Contest(2278, "Round", 100, 60, "BEFORE")]
+
+
+def test_any_case_means_letter_case_only():
+    from cf_tool.codeforces.pages import find_problem_header
+
+    def statement(text: str) -> str:
+        return f'<div class="problem-statement">{text}</div><div class="sample-tests">'
+
+    assert find_problem_header(statement("You can output the answer in any case.")).ignore_case
+    assert find_problem_header(statement("Each letter can be printed in any case.")).ignore_case
+    assert find_problem_header(statement("Comparison is case-insensitive.")).ignore_case
+    idiom = "Print the minimum. In any case, the answer doesn't exceed 10."
+    assert not find_problem_header(statement(idiom)).ignore_case
+
+
+def test_split_problems():
+    from cf_tool.codeforces.pages import find_problem_header, find_samples, split_problems
+
+    parts = split_problems(fixture("contest_2171_problems.html"))
+    assert [index for index, _ in parts] == ["A", "B"]
+    names = [find_problem_header(part).name for _, part in parts]
+    assert names == ["A. Shizuku Hoshikawa and Farm Legs", "B. Yuu Koito and Minimum Absolute Sum"]
+    inputs, outputs = find_samples(parts[0][1])
+    assert len(inputs) == len(outputs) == 1
+    assert split_problems(fixture("problem_4a.html")) == []
+
+
+def test_wants_login():
+    from cf_tool.codeforces.pages import wants_login
+
+    assert wants_login('<form id="enterForm"><input name="handleOrEmail"></form>')
+    assert not wants_login(fixture("problem_4a.html"))
