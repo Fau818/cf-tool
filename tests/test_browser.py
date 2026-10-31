@@ -4,8 +4,12 @@ The real thing can only be checked live; these pin down the decisions:
 what counts as "still on a check page", and how login errors are classified.
 """
 
+import subprocess
+import sys
+import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from cf_tool.codeforces import browser
@@ -63,6 +67,37 @@ def test_goto_times_out_on_an_endless_challenge():
     page = FakePage([CHALLENGE])
     with pytest.raises(CFError, match="not passed in time"):
         browser._goto(page, page.url, deadline(0.05))
+
+
+def test_a_missing_login_form_says_where_the_browser_stopped():
+    check = (FIXTURES / "browser_check_enter.html").read_text()
+    page = FakePage([check], url="https://codeforces.com/enter")
+    with pytest.raises(CFError, match="still on Codeforces' browser check at /enter"):
+        browser._login_form(page, page.url, deadline(0.05))
+
+
+def test_a_browser_left_running_is_ended():
+    # NOTE: a "browser" that ignores quit, with a child process of its own
+    script = (
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "time.sleep(60)\n"
+    )
+    chrome = subprocess.Popen([sys.executable, "-c", script])
+    until = time.monotonic() + 10
+    while not psutil.Process(chrome.pid).children() and time.monotonic() < until:
+        time.sleep(0.05)
+    child = psutil.Process(chrome.pid).children()[0]
+
+    class Stuck:
+        process_id = chrome.pid
+
+        def quit(self):
+            pass
+
+    browser._close(Stuck())
+    assert chrome.wait(timeout=10) is not None
+    assert psutil.wait_procs([child], timeout=10)[1] == []  # NOTE: none left running
 
 
 def test_goto_retries_once_after_a_bounce_home():

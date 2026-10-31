@@ -2,9 +2,11 @@
 insists, and the tiered login.
 
 Login tiers (first that works wins):
-  1. HTTP — GET and POST /enter over curl_cffi. Needs no browser, but
-     Cloudflare challenges /enter unless a cf_clearance is still valid.
-  2. headless browser — passes the checks without showing anything.
+  1. HTTP — GET and POST /enter over curl_cffi. Needs no browser, but a check
+     stands in front of /enter (Cloudflare's, then Codeforces' own), so this
+     rarely gets through any more.
+  2. headless browser — passes the checks without showing anything; a second,
+     fresh one when the first gets stuck.
   3. browser window — last resort, for when a human has to tick a box.
 A credentials error (LoginRejected) stops at once, and so does a missing
 Chrome (BrowserUnavailable): another tier would only fail the same way.
@@ -133,14 +135,20 @@ class Gateway:
             return solved
 
     def _in_browser(self, what: str, run: Callable[[bool], T]) -> T:
-        """run(headless=True); if that fails, run(headless=False) in a window."""
-        try:
-            with ui.status(f"{what}: working in a background browser..."):
-                return run(True)
-        except (LoginRejected, BrowserUnavailable):
-            raise
-        except CFError as e:
-            ui.yellow(f"The background browser did not make it ({e}).")
+        """run(headless=True), then once more in a fresh background browser,
+        and only then run(headless=False) in a window."""
+        for attempt in range(2):
+            try:
+                with ui.status(f"{what}: working in a background browser..."):
+                    return run(True)
+            except (LoginRejected, BrowserUnavailable):
+                raise
+            except CFError as e:
+                if attempt:
+                    ui.yellow(f"The background browser did not make it ({e}).")
+                else:
+                    # NOTE: a stuck one usually goes through on a second try
+                    ui.cyan(f"The background browser got stuck ({e}); starting a fresh one")
         ui.yellow(
             f"{what}: opening a browser window. If Cloudflare shows a check there, "
             "complete it; everything else is filled in for you."
@@ -225,7 +233,7 @@ class Gateway:
         # \     cf_clearance /enter is challenged
         self.http.clear_cookies(keep=is_cloudflare_cookie)
         body = self.http.get(f"{self.host}/enter").text
-        if pages.has_turnstile(body) or pages.is_browser_check(body):
+        if pages.has_turnstile(body) or pages.is_gate(body):
             raise CloudflareChallengeError("the login page wants a browser check")
         csrf = pages.find_csrf(body)
         ftaa = _token(18)

@@ -200,7 +200,24 @@ def test_window_is_the_last_resort(tmp_path, monkeypatch):
     gw = make_gateway(tmp_path, transport)
 
     assert gw.login() == "tourist"
-    assert used == [("login", True), ("login", False)]
+    assert used == [("login", True), ("login", True), ("login", False)]
+
+
+def test_a_stuck_background_browser_gets_a_second_try_before_a_window(tmp_path, monkeypatch):
+    transport = FakeTransport(gets={f"{HOST}/enter": CloudflareChallengeError, HOST: LOGGED_IN})
+    tries = iter([CFError("could not find the login form: still on ..."), None])
+
+    def login(headless):
+        stuck = next(tries)
+        if stuck:
+            raise stuck
+        return browser_session()
+
+    used = fake_browser(monkeypatch, login=login)
+    gw = make_gateway(tmp_path, transport)
+
+    assert gw.login() == "tourist"
+    assert used == [("login", True), ("login", True)]  # NOTE: no window
 
 
 def test_wrong_password_stops_at_http(tmp_path, monkeypatch):

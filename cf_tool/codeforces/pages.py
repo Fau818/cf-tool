@@ -5,7 +5,7 @@ Samples come in the classic markup (lines split by <br>), the newer one
 "Sample Input" statements.
 
 Also here: recognizing the pages that stand *between* us and Codeforces
-(Cloudflare's interstitial, Codeforces' own Turnstile gate).
+(Cloudflare's interstitial, Codeforces' own Turnstile gate and browser check).
 """
 
 from __future__ import annotations
@@ -70,8 +70,26 @@ def is_verification_gate(body: str) -> bool:
 
 def is_gate(body: str) -> bool:
     """True for a page that stands in front of the content: Cloudflare's
-    interstitial or Codeforces' own Turnstile verification page."""
-    return is_cloudflare_challenge(body) or is_verification_gate(body)
+    interstitial, Codeforces' own Turnstile verification page or browser check."""
+    return is_cloudflare_challenge(body) or is_verification_gate(body) or is_browser_check(body)
+
+
+_PAGE_TITLE_RE = re.compile(r"<title[^>]*>([\s\S]*?)</title>", re.IGNORECASE)
+
+
+def describe_page(body: str) -> str:
+    """What a page is, in a few words, for an error message."""
+    if is_cloudflare_challenge(body):
+        return "Cloudflare's check"
+    if is_browser_check(body):
+        return "Codeforces' browser check"
+    if is_verification_gate(body):
+        return "Codeforces' Turnstile check"
+    match = _PAGE_TITLE_RE.search(body)
+    title = " ".join(html_lib.unescape(match.group(1)).split()) if match else ""
+    if title:
+        return f'the page "{title}"'
+    return "a blank page" if not body.strip() else "a page without a title"
 
 
 def has_turnstile(body: str) -> bool:

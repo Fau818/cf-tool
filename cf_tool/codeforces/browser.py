@@ -9,6 +9,7 @@ which is why the browser uses the configured proxy too).
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import sys
@@ -131,10 +132,42 @@ def _run(headless: bool, proxy: str, action: Callable[[Any], T]) -> T:
     except Exception as e:
         raise BrowserError(f"{type(e).__name__}: {_first_line(e)}") from e
     finally:
-        try:
-            page.quit()
-        except Exception:
-            pass
+        _close(page)
+
+
+def _close(page) -> None:
+    """Quit Chrome, then end whatever is left of it: a stuck browser can
+    ignore quit and stay open after cf."""
+    started = _process(page)
+    with contextlib.suppress(Exception):
+        page.quit()
+    if started is None:
+        return
+    import psutil
+
+    pid, created = started
+    try:
+        chrome = psutil.Process(pid)
+        if chrome.create_time() != created:
+            return  # NOTE: gone, and its number taken by another program
+        family = [chrome, *chrome.children(recursive=True)]
+    except psutil.Error:
+        return
+    for process in family:
+        with contextlib.suppress(psutil.Error):
+            process.kill()
+
+
+def _process(page) -> tuple[int, float] | None:
+    """The browser's process id and start time (which tells it from a later
+    program given the same id)."""
+    try:
+        import psutil
+
+        pid = page.process_id
+        return (pid, psutil.Process(pid).create_time()) if pid else None
+    except Exception:
+        return None
 
 
 def _launch(headless: bool, proxy: str):
@@ -175,15 +208,12 @@ def _launch(headless: bool, proxy: str):
         if "HeadlessChrome" not in user_agent:
             return page
         # NOTE: cf_clearance is bound to the UA: show a normal Chrome's from the start
-        page.quit()
+        _close(page)
         page = None
         return ChromiumPage(options(user_agent.replace("HeadlessChrome", "Chrome")))
     except Exception as e:
         if page is not None:
-            try:
-                page.quit()
-            except Exception:
-                pass
+            _close(page)
         raise BrowserError(f"the headless browser failed to start ({_first_line(e)})") from e
 
 
@@ -227,7 +257,7 @@ def _goto(page, url: str, deadline: float) -> None:
     for attempt in range(2):
         page.get(url)
         if not _wait(lambda: (html := _html(page)) != "" and not pages.is_gate(html), deadline):
-            raise CFError("the Cloudflare check was not passed in time")
+            raise CFError(f"the check was not passed in time: {_stuck(page)}")
         if attempt or not _bounced_home(url, page.url):
             return
 
@@ -252,9 +282,17 @@ def _login_form(page, enter_url: str, deadline: float):
         except Exception:  # mid-navigation
             pass
         time.sleep(_POLL)
-    if pages.is_gate(_html(page)):
-        raise CFError("the Cloudflare check was not passed in time")
-    raise CFError("could not find the login form")
+    raise CFError(f"could not find the login form: {_stuck(page)}")
+
+
+def _stuck(page) -> str:
+    """Where the browser stopped, for an error message: "still on
+    Codeforces' browser check at /enter"."""
+    try:
+        path = urlparse(page.url).path or "/"
+    except Exception:
+        path = "?"
+    return f"still on {pages.describe_page(_html(page))} at {path}"
 
 
 def _fill(page, handle_input, handle_or_email: str, password: str):

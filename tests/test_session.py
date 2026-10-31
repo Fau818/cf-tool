@@ -169,6 +169,10 @@ def test_a_challenge_is_raised(monkeypatch, no_wait):
     fake_session(transport, monkeypatch, [Answer(403, "", {"cf-mitigated": "challenge"})])
     with pytest.raises(CloudflareChallengeError):
         transport.get("https://codeforces.com/enter")
+    check = "<p>Please wait. Your browser is being checked. It may take a few seconds...</p>"
+    fake_session(transport, monkeypatch, [Answer(200, check)])  # NOTE: Codeforces' own, a 200
+    with pytest.raises(CloudflareChallengeError):
+        transport.get("https://codeforces.com/enter")
 
 
 def test_a_post_is_sent_once(monkeypatch, no_wait):

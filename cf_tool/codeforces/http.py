@@ -55,8 +55,8 @@ def is_challenge(response) -> bool:
     text = response.text
     if response.status_code in (403, 503) and pages.is_cloudflare_challenge(text):
         return True
-    # Codeforces' own Turnstile gate is served with 200
-    return pages.is_verification_gate(text)
+    # Codeforces' own Turnstile gate and browser check are served with 200
+    return pages.is_verification_gate(text) or pages.is_browser_check(text)
 
 
 def is_cloudflare_cookie(name: str) -> bool:

@@ -7,6 +7,7 @@ import pytest
 
 from cf_tool.errors import CFError
 from cf_tool.codeforces.pages import (
+    describe_page,
     find_code,
     find_countdown,
     find_csrf,
@@ -284,7 +285,27 @@ def test_codeforces_turnstile_page_is_a_gate():
 def test_codeforces_browser_check_on_the_login_page():
     page = fixture("browser_check_enter.html")
     assert is_browser_check(page)
+    assert is_gate(page)
     assert not has_turnstile(page)
+
+
+@pytest.mark.parametrize(
+    "name,described",
+    [
+        ("challenge_enter.html", "Cloudflare's check"),
+        ("browser_check_enter.html", "Codeforces' browser check"),
+        ("verification_gate.html", "Codeforces' Turnstile check"),
+    ],
+)
+def test_a_check_page_is_named_in_errors(name, described):
+    assert describe_page(fixture(name)) == described
+
+
+def test_another_page_is_named_by_its_title():
+    assert describe_page("<html><title>  Codeforces &amp; co\n</title></html>") == (
+        'the page "Codeforces & co"'
+    )
+    assert describe_page("") == "a blank page"
 
 
 @pytest.mark.parametrize(

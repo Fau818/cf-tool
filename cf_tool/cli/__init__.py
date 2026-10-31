@@ -4,6 +4,9 @@ traceback (CF_DEBUG=1 shows the traceback too)."""
 
 from __future__ import annotations
 
+import contextlib
+import signal
+
 import click
 
 from cf_tool import __version__, settings as settings_module, ui
@@ -65,12 +68,20 @@ def main(ctx: click.Context) -> None:
     """
     if ctx.invoked_subcommand == "completion":
         return  # NOTE: its output is a script the shell evaluates; notes would break it
+    # NOTE: a stopped cf (kill, a tool's timeout) unwinds like Ctrl-C, so the
+    # \     browser or program it started is closed, not left running
+    with contextlib.suppress(ValueError):  # NOTE: only possible in the main thread
+        signal.signal(signal.SIGTERM, _interrupt)
     try:
         notes = settings_module.migrate()
     except OSError as e:
         notes = [f"Could not move your old settings ({e})"]
     for note in notes:
         ui.yellow(note)
+
+
+def _interrupt(signum, frame) -> None:
+    raise KeyboardInterrupt
 
 
 # one line each in cf --help
