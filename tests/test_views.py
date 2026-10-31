@@ -17,7 +17,7 @@ def render(view) -> str:
 
 def test_first_differing_case_only():
     text = render(views.failed_sample(INPUT, ["1", "0", "9", "2", "27"], ANSWER, CASES))
-    assert text.startswith("Test case 3 of 5 differs (also 5)\n-----Input of test case 3-----\n4\n")
+    assert text.startswith("Test case 3 of 5 differs (also 5)\n── input of test case 3 ──\n4\n")
     assert "9" in text and "26" not in text  # NOTE: case 5's lines aren't shown
 
 
@@ -33,12 +33,12 @@ def test_extra_output_after_the_last_case():
 
 def test_an_edited_sample_gets_the_plain_diff():
     text = render(views.failed_sample(INPUT, ["1", "0", "9", "2", "27"], ANSWER + ["x"], CASES))
-    assert text.startswith("-----Input-----")
+    assert text.startswith("── input ──")
 
 
 def test_without_cases_the_plain_diff():
     text = render(views.failed_sample("8\n", ["NO"], ["YES"]))
-    assert text.startswith("-----Input-----\n8\n") and "NO" in text and "YES" in text
+    assert text.startswith("── input ──\n8\n") and "NO" in text and "YES" in text
 
 
 def test_no_output():

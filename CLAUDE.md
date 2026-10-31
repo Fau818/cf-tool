@@ -120,6 +120,12 @@ cf_tool/
   travel with its UA (`Gateway._adopt`), and the browser uses the configured proxy.
 - **Cookies are full records** (name/value/domain/path/expires), adopted per name across
   domains; never flatten them to `{name: value}`.
+- **One palette** (`ui.ACCENT/SUCCESS/WARNING/ERROR/MUTED`): plain color names in styles
+  ("green", "bold cyan", "dim") are mapped to it by `ui.styled` (ui.line does it); messages
+  go through `ui.success/info/warn/error` (✓ › ! ✗). Menu rows that show a setting are
+  `ui.row(label, value, note)`: select() lines them up and colors the parts.
+- **Prompts raise `ui.Canceled`** on Esc or Ctrl-C (cf_command prints "Canceled."); the
+  settings menu catches it to go back a level.
 - **Text output is never Rich markup** (and `Console(emoji=False)`): `ui.*` print
   literally; mixed styles via `ui.line()` or `Text` (sample I/O like `a[i]`, `[/]`, `:x:`
   must survive). Machine-read output (`cf config --path`) goes through `click.echo`.

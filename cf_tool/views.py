@@ -16,8 +16,11 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from cf_tool import ui
 from cf_tool.codeforces.pages import Contest, ProblemRow, Submission
 from cf_tool.workspace import Cases
+
+HEADER = f"bold {ui.ACCENT}"
 
 LinesAlike = Callable[[str, str], bool]  # (output line, answer line): counts as it?
 
@@ -28,7 +31,7 @@ DIFF_LINES = 40
 
 def submission_table(submissions: list[Submission], problem_id: str = "") -> Table:
     """Recent submissions (cf status), optionally one problem's."""
-    table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
+    table = Table(box=box.ROUNDED, border_style=ui.MUTED, header_style=HEADER)
     # long columns may wrap on narrow terminals; the short ones never do
     for column in ("#", "when", "problem", "lang", "status", "time", "memory"):
         table.add_column(column, justify="center", no_wrap=column in ("#", "time", "memory"))
@@ -41,7 +44,7 @@ def submission_table(submissions: list[Submission], problem_id: str = "") -> Tab
             Text(sub.when),
             Text(sub.name),
             Text(sub.lang),
-            Text(status, style=style),
+            Text(status, style=ui.styled(style)),
             sub.parse_time(),
             sub.parse_memory(),
         )
@@ -53,32 +56,32 @@ def submission_panel(sub: Submission, boxed: bool = True) -> Panel | Table:
     "status: Accepted" for programs reading them."""
     status, style = sub.styled_status()
     grid = Table.grid(padding=(0, 1))
-    grid.add_column(justify="right", style="bold cyan")
+    grid.add_column(justify="right", style=HEADER)
     grid.add_column()
     grid.add_row("#:", str(sub.id))
     grid.add_row("when:", Text(sub.when))
     grid.add_row("prob:", Text(sub.name))
     grid.add_row("lang:", Text(sub.lang))
-    grid.add_row("status:", Text(status, style=style or "white"))
+    grid.add_row("status:", Text(status, style=ui.styled(style or "white")))
     grid.add_row("time:", sub.parse_time() if sub.end else "-")
     grid.add_row("memory:", sub.parse_memory() if sub.end else "-")
     if not boxed:
         return grid
-    border = style if sub.end and style else "dim"
+    border = ui.styled(style) if sub.end and style else ui.MUTED
     return Panel(grid, box=box.ROUNDED, border_style=border, expand=False)
 
 
 def problems_table(problems: list[ProblemRow]) -> Table:
     """A contest's problems (cf problems): solved rows green, failed ones red."""
-    table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
+    table = Table(box=box.ROUNDED, border_style=ui.MUTED, header_style=HEADER)
     for column in ("#", "problem", "passed", "limit", "IO"):
         table.add_column(column, justify="center")
     for prob in problems:
         style = ""
         if "accepted" in prob.state:
-            style = "black on green"
+            style = f"black on {ui.SUCCESS}"
         elif "rejected" in prob.state:
-            style = "black on red"
+            style = f"black on {ui.ERROR}"
         table.add_row(
             *(Text(v) for v in (prob.id, prob.name, prob.passed, prob.limit, prob.io)),
             style=style,
@@ -116,7 +119,7 @@ def _length(seconds: int) -> str:
 
 def contests_table(contests: list[Contest], now: float) -> Table:
     """Upcoming contests (`cf contests`), soonest first."""
-    table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
+    table = Table(box=box.ROUNDED, border_style=ui.MUTED, header_style=HEADER)
     for column in ("#", "contest", "starts", "in", "length"):
         table.add_column(column, no_wrap=column != "contest")
     for contest in contests:
@@ -167,16 +170,16 @@ def to_ics(contests: list[Contest], host: str, now: float) -> str:
 def _clip(lines: list[str], limit: int) -> Text:
     text = Text("\n".join(lines[:limit]))
     if len(lines) > limit:
-        text.append(f"\n… {len(lines) - limit} more lines", style="dim")
+        text.append(f"\n… {len(lines) - limit} more lines", style=ui.MUTED)
     return text
 
 
 def program_output(text: str, title: str = "Output") -> Group:
     """Text a program printed (or got), under a -----title----- heading; its
     first lines only."""
-    heading = Text(f"-----{title}-----", style="cyan")
+    heading = Text(f"── {title.lower()} ──", style=ui.ACCENT)
     if not text.strip():
-        return Group(heading, Text(f"(no {title.lower()})", style="dim"))
+        return Group(heading, Text(f"(no {title.lower()})", style=ui.MUTED))
     return Group(heading, _clip(text.rstrip("\n").split("\n"), INPUT_LINES))
 
 
@@ -184,8 +187,8 @@ def _diff_rows(
     rows: list[int], out_lines: list[str], ans_lines: list[str], same: LinesAlike = operator.eq
 ) -> Table:
     """Output and answer side by side for these line indexes, differences marked."""
-    diff = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", pad_edge=False)
-    diff.add_column("#", justify="right", style="dim")
+    diff = Table(box=box.SIMPLE_HEAD, header_style=HEADER, pad_edge=False)
+    diff.add_column("#", justify="right", style=ui.MUTED)
     diff.add_column("output")
     diff.add_column("answer")
     for i in rows:
@@ -195,14 +198,14 @@ def _diff_rows(
         diff.add_row(
             str(i + 1),
             (
-                Text("(missing)", style="dim")
+                Text("(missing)", style=ui.MUTED)
                 if out is None
-                else Text(out, style="" if alike else "red")
+                else Text(out, style="" if alike else ui.ERROR)
             ),
             (
-                Text("(missing)", style="dim")
+                Text("(missing)", style=ui.MUTED)
                 if ans is None
-                else Text(ans, style="" if alike else "green")
+                else Text(ans, style="" if alike else ui.SUCCESS)
             ),
         )
     return diff
@@ -231,7 +234,7 @@ def _failing_case(
     if not bad:  # NOTE: every case matches, so the output only runs longer
         extra = list(range(len(ans_lines), len(out_lines)))[:DIFF_LINES]
         return Group(
-            Text("Extra output after the last test case", style="red"),
+            Text("Extra output after the last test case", style=ui.ERROR),
             _diff_rows(extra, out_lines, ans_lines, same),
         )
     case = bad[0]
@@ -239,8 +242,8 @@ def _failing_case(
     rows = [i for i, c in enumerate(answer_cases) if c == case][:DIFF_LINES]
     case_input = [line for line, c in zip(input_lines, input_cases) if c == case]
     return Group(
-        Text(f"Test case {case} of {total} differs{others}", style="red"),
-        Text(f"-----Input of test case {case}-----", style="cyan"),
+        Text(f"Test case {case} of {total} differs{others}", style=ui.ERROR),
+        Text(f"── input of test case {case} ──", style=ui.ACCENT),
         _clip(case_input, INPUT_LINES),
         _diff_rows(rows, out_lines, ans_lines, same),
     )
@@ -275,10 +278,10 @@ def failed_sample(
     start = max(0, first_bad - 5) if total > DIFF_LINES else 0
     stop = min(total, start + DIFF_LINES)
     parts: list[RenderableType] = [
-        Text("-----Input-----", style="cyan"),
+        Text("── input ──", style=ui.ACCENT),
         _clip(input_lines, INPUT_LINES),
         _diff_rows(list(range(start, stop)), out_lines, ans_lines, same),
     ]
     if start or stop < total:
-        parts.append(Text(f"lines {start + 1}–{stop} of {total}", style="dim"))
+        parts.append(Text(f"lines {start + 1}–{stop} of {total}", style=ui.MUTED))
     return Group(*parts)

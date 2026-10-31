@@ -158,7 +158,7 @@ def test_get_a_contest(home):
     code = (folder / "a.py").read_text()
     assert "# A. Test" in code and f"# {HOST}/contest/2050/problem/A" in code
     assert (home["work"] / "2050" / "b" / "b.py").exists()
-    assert "Next: cd 2050/a" in result.output
+    assert "→ cd 2050/a, then cf test and cf submit there" in result.output
 
 
 def test_get_again_keeps_your_code(home):
@@ -619,31 +619,33 @@ def by_label(part):
 
 def test_config_menu_first_choices_are_recommended(menu):
     settings_file('language = "py"\n')
-    menu["answers"] = [by_label("submitted as"), by_label("Python 3.13"), "done"]
+    menu["answers"] = [by_label("Submitted as"), by_label("Python 3.13"), "done"]
     assert run("config").exit_code == 0
     rows = menu["asked"][0][1]
-    assert any("Python submitted as" in row and "(recommended)" in row for row in rows)
+    first = rows.index(next(row for row in rows if row.startswith("Submitted as")))
+    assert "recommended" in rows[first] and "PyPy 3.10" in rows[first]  # NOTE: Python's, first
     message, labels, default = menu["asked"][1]
-    assert labels[0] == "PyPy 3.10 (7.3.15, 64bit) (recommended)" and default == ""
+    assert labels[0].startswith("PyPy 3.10 (7.3.15, 64bit)") and "recommended" in labels[0]
+    assert default == ""
     assert 'submit = "31"' in paths.config_file().read_text()  # NOTE: saved by its id
-    menu["answers"] = [by_label("submitted as"), by_label("recommended"), "done"]
+    menu["answers"] = [by_label("Submitted as"), by_label("recommended"), "done"]
     assert run("config").exit_code == 0
     assert "submit" not in paths.config_file().read_text().split("[py]")[-1]
 
 
 def test_config_menu_build_and_run(menu):
     python_language()
-    menu["answers"] = [by_label("build and run"), "flags", "done"]
+    menu["answers"] = [by_label("Build and run"), "flags", "done"]
     menu["texts"] = ["-X dev"]
     assert run("config").exit_code == 0
     text = paths.config_file().read_text()
     assert 'flags = "-X dev"' in text and "run =" not in text  # NOTE: python_language's run went
-    menu["answers"] = [by_label("build and run"), "own", "done"]
+    menu["answers"] = [by_label("Build and run"), "own", "done"]
     menu["texts"] = ["", "pypy3 {src}"]
     assert run("config").exit_code == 0
     conf = common.settings().language_settings("py")
     assert (conf.build, conf.run, conf.flags) == ((), ("pypy3", "{src}"), ())
-    menu["answers"] = [by_label("build and run"), "", "done"]
+    menu["answers"] = [by_label("Build and run"), "", "done"]
     assert run("config").exit_code == 0
     conf = common.settings().language_settings("py")
     assert (conf.build, conf.run, conf.flags) == (None, None, ())
@@ -651,13 +653,13 @@ def test_config_menu_build_and_run(menu):
 
 def test_config_menu_starter_and_proxy(menu):
     settings_file('language = "cpp"\n')
-    menu["answers"] = [by_label("starter code"), "copy", by_label("Proxy"), "done"]
+    menu["answers"] = [by_label("Starter code"), "copy", by_label("Proxy"), "done"]
     menu["texts"] = ["socks5://127.0.0.1:1080"]
     assert run("config").exit_code == 0
     copied = paths.templates_dir() / "template.cpp"
     assert "bits/stdc++.h" in copied.read_text()
     assert common.settings().proxy == "socks5://127.0.0.1:1080"
-    menu["answers"] = [by_label("Proxy"), by_label("Language"), "go", "done"]
+    menu["answers"] = [by_label("Proxy"), by_label("Language for new"), "go", "done"]
     menu["texts"] = [""]
     assert run("config").exit_code == 0
     assert common.settings().proxy == "" and common.settings().language == "go"
@@ -842,3 +844,19 @@ def test_a_language_no_longer_offered_is_picked_again(home, monkeypatch):
     assert labels == ["PyPy 3.10 (7.3.15, 64bit)", "Python 3.13.2", "Don't submit"]
     assert home["client"].submitted == [("546D.py", "546D", "31")]
     assert 'submit = "31"' in paths.config_file().read_text()  # NOTE: kept, after a yes
+
+
+def test_config_menu_is_one_list(menu, monkeypatch):
+    settings_file('language = "cpp"\n')
+
+    def esc(message, options):
+        raise ui.Canceled()
+
+    menu["answers"] = [by_label("Compiler"), esc, esc]  # NOTE: back from the list, then out
+    result = run("config")
+    assert result.exit_code == 0, result.output
+    first, labels, _ = menu["asked"][0]
+    assert "tourist" in first  # NOTE: who is logged in, in the title
+    assert not any("Login" in label or "Another language" in label for label in labels)
+    assert not any(label.startswith("C\x1f") for label in labels)  # NOTE: C is C++'s
+    assert [message for message, _, _ in menu["asked"]][2] == first  # NOTE: back in the menu

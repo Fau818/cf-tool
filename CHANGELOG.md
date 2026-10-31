@@ -26,6 +26,8 @@ A new cf-tool: it no longer follows the Go cf-tool's model, and needs no setup.
   submission newer than the last one instead of sending it again. Without a terminal (CP
   Editor), it never waits for an answer nobody can give.
 - **`cf stress`** finds `gen.*` and `brute.*` in the problem's folder.
+- **A new look**: softer colors throughout, ✓ ! ✗ marks on messages, menus with their
+  values lined up and the recommended choices marked; Esc backs out of any prompt.
 - **New commands**: `login`, `logout`, `langs`, `new`, `problems`, `status`, `open -s`,
   `open --last`. The 0.3 names (`parse`, `gen`, `watch`, `list`, `stand`, `sid`) still
   work.

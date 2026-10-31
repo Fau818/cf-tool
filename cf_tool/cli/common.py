@@ -41,6 +41,9 @@ def cf_command(f):
             fail(str(e))
         except OSError as e:  # NOTE: unreadable or unwritable files and the like
             fail(str(e))
+        except ui.Canceled:
+            ui.dim("Canceled.")
+            sys.exit(1)
         except KeyboardInterrupt:
             print("\nInterrupted.")
             sys.exit(1)
@@ -145,7 +148,9 @@ def starter_language(asked: str | None = None) -> str:
         ui.yellow("No language picked yet: writing C++ (set language in cf config, or give -l)")
         return "cpp"
     keys = [
-        *languages.LANGUAGES,
+        *(
+            key for key in languages.LANGUAGES if key != "c"
+        ),  # NOTE: C++ covers it; .c files still work
         *(key for key in current.languages if key not in languages.LANGUAGES),
     ]
     key = ui.select(

@@ -61,7 +61,7 @@ def langs(show_all: bool) -> None:
     current = settings()
     offered, live = client().languages() if show_all else (languages.known_languages(), False)
     if show_all:
-        table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
+        table = Table(box=box.ROUNDED, border_style=ui.MUTED, header_style=f"bold {ui.ACCENT}")
         for column in ("id", "Codeforces language", "files"):
             table.add_column(column)
         for ext, group in sorted(
@@ -73,10 +73,10 @@ def langs(show_all: bool) -> None:
         if not live:
             ui.yellow("Not logged in: this is the list read last (cf login reads the current one).")
         return
-    table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
+    table = Table(box=box.ROUNDED, border_style=ui.MUTED, header_style=f"bold {ui.ACCENT}")
     for column in ("language", "files", "builds and runs with", "submits as", "starter code"):
         table.add_column(column)
-    keys = list(dict.fromkeys([*languages.LANGUAGES, *current.languages]))
+    keys = list(dict.fromkeys([*configure.LISTED, *current.languages]))  # NOTE: C: by its files
     for key in keys:
         language = languages.LANGUAGES.get(key)
         files = " ".join(f".{ext}" for ext in (language.extensions if language else (key,)))
@@ -85,11 +85,11 @@ def langs(show_all: bool) -> None:
             tool = Text(setup.tool)
             submits = Text(
                 setup.submit[1] if setup.submit else "not offered",
-                style="" if setup.submit else "yellow",
+                style="" if setup.submit else ui.WARNING,
             )
         except CFError as e:
             hint = str(e).split(". To get one: ")
-            tool = Text(f"missing: {hint[-1]}" if len(hint) > 1 else str(e), style="yellow")
+            tool = Text(f"missing: {hint[-1]}" if len(hint) > 1 else str(e), style=ui.WARNING)
             submits = Text("")
         try:
             _, origin = languages.starter(key, current)

@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 
 import click
+from rich.table import Table
+from rich.text import Text
 
 from cf_tool import languages, listen as listen_module, ui, views, workspace
 from cf_tool.cli.common import (
@@ -50,6 +52,9 @@ def set_up(target: Target, key: str, tries: int = 1) -> Path:
         raise CFError(f"{target.label} has no problems to see yet: {wait}")
     root = workspace.get_root(Path.cwd(), settings().root_folder())
     folders = []
+    grid = Table.grid(padding=(0, 2))
+    for column in ("folder", "name", "tests", "code", "notes"):
+        grid.add_column(no_wrap=column != "notes")
     for problem in found:
         problem_target = target.with_problem(problem.index)
         folder = workspace.problem_folder(root, problem_target)
@@ -59,28 +64,23 @@ def set_up(target: Target, key: str, tries: int = 1) -> Path:
         code = write_starter(folder, problem_target, problem.info, key)
         folders.append(folder)
         count = len(problem.samples)
-        parts = [
-            (f"{short(folder):<10}", "bold green"),
-            (f"  {problem.info.name or problem.index}", ""),
-            (f"  {count} test{'s' if count != 1 else ''}", "dim"),
-        ]
-        if code is not None:
-            parts.append((f", {code.name}", "dim"))
+        notes = []
         if problem.error:
-            parts.append((f"  no samples: {problem.error}", "yellow"))
+            notes.append(f"no samples: {problem.error}")
         if not problem.standard_io:
-            parts.append(("  reads and writes files, not the console", "yellow"))
+            notes.append("reads and writes files")
         if problem.info.interactive:
-            parts.append(("  interactive: cf test needs an interactor", "yellow"))
-        ui.line(*parts)
-    if len(folders) == 1:
-        ui.line(("Next: ", "cyan"), (f"cd {short(folders[0])}", "bold"), (", then cf test", "cyan"))
-    else:
-        ui.line(
-            ("Next: ", "cyan"),
-            (f"cd {short(folders[0])}", "bold"),
-            (", then cf test and cf submit there", "cyan"),
+            notes.append("interactive: cf test needs an interactor")
+        grid.add_row(
+            Text(short(folder), style=f"bold {ui.ACCENT}"),
+            Text(problem.info.name or problem.index),
+            Text(f"{count} test{'s' if count != 1 else ''}", style=ui.MUTED),
+            Text(code.name if code is not None else "", style=ui.MUTED),
+            Text("; ".join(notes), style=ui.WARNING),
         )
+    ui.console.print(grid)
+    then = "cf test" if len(folders) == 1 else "cf test and cf submit there"
+    ui.line(("→ ", "cyan bold"), (f"cd {short(folders[0])}", "bold"), (f", then {then}", "dim"))
     return folders[0].parent
 
 

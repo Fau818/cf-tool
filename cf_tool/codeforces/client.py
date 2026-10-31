@@ -175,9 +175,12 @@ class Client:
         lang_id, lang_name = choose_language(offered or languages.known_languages())
         shown = f" ({filename})" if filename else ""
         ui.line(
-            ("Submitting ", "cyan"),
+            ("› ", "cyan bold"),
+            ("Submitting ", "dim"),
             (target.label, "bold"),
-            (f"{shown} as {lang_name}, logged in as {handle}", "cyan"),
+            (f"{shown} as ", "dim"),
+            (lang_name, ""),
+            (f" · {handle}", "dim"),
         )
         csrf = pages.find_csrf(body)
         ftaa, bfaa = self.gw.form_tokens()

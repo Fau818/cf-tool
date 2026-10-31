@@ -144,7 +144,7 @@ def test_submit(submitting, capsys):
     assert offered == [["54", "70", "91"]]
     assert submitting.gw.posted[0]["programTypeId"] == "91"
     out = capsys.readouterr().out
-    assert "4A (a.cpp) as GNU G++23 14.2 (64 bit, msys2), logged in as tourist" in out
+    assert "Submitting 4A (a.cpp) as GNU G++23 14.2 (64 bit, msys2) · tourist" in out
     assert submitting.session.last_submission == {
         "kind": "contest",
         "contest": "4",

@@ -115,14 +115,40 @@ def test_number_keys_pick_across_a_heading(monkeypatch):
 
 
 @pytest.mark.parametrize("keys", ["\x1b", "\x1b\r"])
-def test_escape_cancels(monkeypatch, capsys, keys):
-    with pytest.raises(SystemExit):  # Esc+Enter used to answer "" (prompt_toolkit's Meta-Enter)
+def test_escape_cancels(monkeypatch, keys):
+    with pytest.raises(ui.Canceled):  # NOTE: Esc+Enter used to answer "" (Meta-Enter)
         run_menu(monkeypatch, keys, default="a")
-    assert "Interrupted." in capsys.readouterr().out
 
 
-def test_an_answer_that_is_no_item_is_a_cancel(monkeypatch, capsys):
+def test_an_answer_that_is_no_item_is_a_cancel(monkeypatch):
     fake_questionary(monkeypatch, answer="")
-    with pytest.raises(SystemExit):
+    with pytest.raises(ui.Canceled):
         ui.select("Which file?", CHOICES, default="a")
-    assert "Interrupted." in capsys.readouterr().out
+
+
+def test_escape_cancels_typing_too(monkeypatch):
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    monkeypatch.setattr(ui, "interactive", lambda: True)
+    with create_pipe_input() as inp:
+        inp.send_text("abc\x1b")
+        with create_app_session(input=inp, output=DummyOutput()):
+            with pytest.raises(ui.Canceled):
+                ui.text("Proxy:")
+
+
+def test_rows_line_up(monkeypatch, capsys):
+    monkeypatch.setattr(ui, "interactive", lambda: False)
+    monkeypatch.setattr(ui, "choose_index", lambda n, default: default)
+    rows = [
+        (ui.row("Compiler", "GCC 14", "recommended"), "a"),
+        (ui.row("Starter code", "built-in"), "b"),
+    ]
+    assert ui.select("Settings", rows) == "a"
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1:] == [
+        "  1) Compiler       GCC 14  (recommended)",
+        "  2) Starter code   built-in",
+    ]

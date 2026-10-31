@@ -166,9 +166,9 @@ def _usage(result: process.Result, info: ProblemInfo | None) -> list[tuple[str, 
     memory_limit = info.memory_limit if info else None
     over_time = time_limit is not None and result.cpu > time_limit
     over_memory = memory_limit is not None and result.memory > memory_limit * 1024 * 1024
-    parts = [("  ", ""), (f"{result.cpu:.3f}s", "yellow" if over_time else "")]
+    parts = [("  ", ""), (f"{result.cpu:.3f}s", "yellow" if over_time else "dim")]
     if result.memory:
-        parts += [("  ", ""), (format_memory(result.memory), "yellow" if over_memory else "")]
+        parts += [("  ", ""), (format_memory(result.memory), "yellow" if over_memory else "dim")]
     if over_time:
         parts.append((f"  over the {time_limit:g}s limit", "yellow"))
     if over_memory:
@@ -368,7 +368,8 @@ def run_tests(
         )
         if summary.ran:
             text += f", {len(summary.ran)} without an answer"
-        ui.line((text, "bold red" if summary.failed else "bold green"))
+        mark = ("✗ ", "red bold") if summary.failed else ("✓ ", "green bold")
+        ui.line(mark, (text, "bold"))
     return summary
 
 

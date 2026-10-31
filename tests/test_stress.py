@@ -52,7 +52,7 @@ def test_a_crash_is_kept_too(tmp_path, capsys):
     crash = "n = int(input())\nassert n != 7\nprint(n * (n + 1) // 2)\n"
     assert stress(tmp_path, *programs(tmp_path, crash), tests=200) is not None
     out = capsys.readouterr().out
-    assert "Runtime error (exit status 1)" in out and "-----Input-----" in out
+    assert "Runtime error (exit status 1)" in out and "── input ──" in out
 
 
 def test_a_hang_is_kept_too(tmp_path, capsys, monkeypatch):

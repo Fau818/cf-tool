@@ -1,7 +1,7 @@
-"""cf config's menu: the settings people change, each picked from a list
-whose first choice is the recommended one (and pre-selected, so Enter takes
-it), and saved in config.toml. The file stays open to editing too
-(cf config --edit)."""
+"""cf config's menu: every setting in one list, grouped by language. Each
+setting opens a list whose first choice is the recommended one (already
+selected, so Enter keeps it); Esc goes back. Everything is saved in
+config.toml, which stays open to editing too (cf config --edit)."""
 
 from __future__ import annotations
 
@@ -12,24 +12,19 @@ import shutil
 from pathlib import Path
 
 import click
-from rich.cells import cell_len
 
 from cf_tool import languages, paths, ui
-from cf_tool.cli.common import ask_login, client, reset, settings, short
+from cf_tool.cli.common import client, reset, settings, short
 from cf_tool.errors import CFError
 from cf_tool.settings import Settings
 
 DEFAULT = ""  # the menu value for the recommended choice: the setting goes away
 OTHER = "\0other"  # the menu value for "something not listed"
-_WIDTH = 24  # columns for a menu label, so the current values line up
+RECOMMENDED = "recommended"
 
-
-def _row(label: str, value: str) -> str:
-    return label + " " * max(2, _WIDTH - cell_len(label)) + value
-
-
-def _recommended(text: str) -> str:
-    return f"{text} (recommended)"
+# the languages the menus offer; C is left to its files (.c still works),
+# since hardly anybody picks it over C++
+LISTED = [key for key in languages.LANGUAGES if key != "c"]
 
 
 def _offered() -> dict[str, str]:
@@ -69,39 +64,43 @@ def _shown(command: str) -> str:
 # └──────────────────────────────────────────────────────────┘
 
 
-def _submit_text(key: str, offered: dict[str, str]) -> str:
+def _compiler_row(key: str) -> str:
+    conf = settings().language_settings(key)
+    label = "Interpreter" if key == "py" else "Compiler"
+    if conf.compiler:
+        return ui.row(label, conf.compiler)
+    tools = _tools(key)
+    if not tools:
+        return ui.row(label, f"none found: {languages.LANGUAGES[key].install_hint()}")
+    return ui.row(label, tools[0].label, RECOMMENDED)
+
+
+def _submit_row(key: str, offered: dict[str, str]) -> str:
     conf = settings().language_settings(key)
     chosen = languages.choose_submit(key, conf.submit, offered)
     if chosen is None:
-        return f"{conf.submit} (not offered any more)" if conf.submit else "nothing offered"
-    return chosen[1] if conf.submit else _recommended(chosen[1])
+        value = f"{conf.submit}, not offered any more" if conf.submit else "nothing offered"
+        return ui.row("Submitted as", value)
+    return ui.row("Submitted as", chosen[1], "" if conf.submit else RECOMMENDED)
 
 
-def _compiler_text(key: str) -> str:
-    conf = settings().language_settings(key)
-    if conf.compiler:
-        return conf.compiler
-    tools = _tools(key)
-    if not tools:
-        return f"none found: {languages.LANGUAGES[key].install_hint()}"
-    return _recommended(tools[0].label)
-
-
-def _commands_text(key: str) -> str:
+def _commands_row(key: str) -> str:
     conf = settings().language_settings(key)
     if conf.build is not None or conf.run is not None:
-        return "your own"
+        return ui.row("Build and run", "your own commands")
     if conf.flags:
-        return f"recommended, with {' '.join(conf.flags)}"
-    return "recommended"
+        return ui.row("Build and run", f"recommended + {' '.join(conf.flags)}")
+    return ui.row("Build and run", "the recommended commands", RECOMMENDED)
 
 
-def _starter_text(key: str) -> str:
+def _starter_row(key: str) -> str:
     try:
         _, origin = languages.starter(key, settings())
     except CFError:
-        return f"{settings().language_settings(key).template} (missing)"
-    return _recommended("built-in") if origin == "built-in" else short(origin)
+        return ui.row("Starter code", f"{settings().language_settings(key).template} (missing)")
+    if origin == "built-in":
+        return ui.row("Starter code", "the built-in one", RECOMMENDED)
+    return ui.row("Starter code", short(origin))
 
 
 # ┌──────────────────────────────────────────────────────────┐
@@ -111,7 +110,7 @@ def _starter_text(key: str) -> str:
 
 def pick_language() -> None:
     current = settings()
-    keys = [*languages.LANGUAGES, *(k for k in current.languages if k not in languages.LANGUAGES)]
+    keys = [*LISTED, *(k for k in current.languages if k not in languages.LANGUAGES)]
     key = ui.select(
         "Which language do you write in? (cf get writes your starter code in it)",
         [(languages.display_name(k), k) for k in keys],
@@ -127,10 +126,10 @@ def pick_compiler(key: str) -> None:
     conf = settings().language_settings(key)
     choices = []
     if tools:
-        choices.append((_recommended(tools[0].label), DEFAULT))
+        choices.append((ui.row(tools[0].label, "", RECOMMENDED), DEFAULT))
         choices += [(tool.label, tool.program) for tool in tools[1:]]
     else:
-        ui.yellow(f"No compiler found here: {languages.LANGUAGES[key].install_hint()}")
+        ui.warn(f"No compiler found here: {languages.LANGUAGES[key].install_hint()}")
     if conf.compiler and conf.compiler not in [value for _, value in choices]:
         choices.append((conf.compiler, conf.compiler))
     choices.append(("Another program...", OTHER))
@@ -138,11 +137,12 @@ def pick_compiler(key: str) -> None:
         f"Which {languages.display_name(key)} compiler?", choices, default=conf.compiler or DEFAULT
     )
     if program == OTHER:
-        program = ui.text(
-            "The program (on PATH, or its full path):",
-            validate=lambda s: bool(shutil.which(s.strip())) or "Not found",
-            allow_empty=False,
+        program = ui.path(
+            "The program (its name on PATH, or its path; Tab completes):",
+            validate=lambda s: bool(shutil.which(str(Path(s.strip()).expanduser())))
+            or "Not a program that runs",
         )
+        program = str(Path(program).expanduser()) if "/" in program else program
     if program == DEFAULT:
         settings().remove("compiler", table=key)
     else:
@@ -156,13 +156,13 @@ def pick_submit(key: str) -> None:
     options = languages.family(key, offered)
     name = languages.display_name(key)
     if not options:
-        ui.yellow(f"Codeforces offers no {name} language that cf-tool knows of")
+        ui.warn(f"Codeforces offers no {name} language that cf-tool knows of")
         return
     conf = settings().language_settings(key)
     chosen = languages.choose_submit(key, conf.submit, offered) if conf.submit else None
     lang_id = ui.select(
         f"Submit {name} to Codeforces as:",
-        [(_recommended(options[0][1]), DEFAULT)] + [(n, lid) for lid, n in options[1:]],
+        [(ui.row(options[0][1], "", RECOMMENDED), DEFAULT)] + [(n, lid) for lid, n in options[1:]],
         default=chosen[0] if chosen and chosen != options[0] else DEFAULT,
         search=len(options) > ui.MAX_SHORTCUTS,
     )
@@ -179,16 +179,17 @@ def pick_commands(key: str) -> None:
     conf = settings().language_settings(key)
     recommended = _commands(key, recommended=True)
     if recommended is None:
-        ui.yellow(f"No {name} compiler found here: pick one first")
+        ui.warn(f"No {name} compiler found here: pick one first")
         return
     build, run = recommended
-    ui.plain(f"Recommended:  build  {_shown(build)}\n              run    {_shown(run)}")
-    ui.dim("({src} is your code file, {exe} the program built from it, kept out of your folder)")
+    ui.line(("Recommended  ", "dim"), ("build  ", "dim"), (_shown(build), "cyan"))
+    ui.line(("             ", "dim"), ("run    ", "dim"), (_shown(run), "cyan"))
+    ui.dim("{src} is your code file, {exe} the program built from it (kept out of your folder)")
     own = conf.build is not None or conf.run is not None
     action = ui.select(
         f"How should {name} be built and run?",
         [
-            (_recommended("These"), DEFAULT),
+            (ui.row("These", "", RECOMMENDED), DEFAULT),
             ("These, with flags of mine added (like -DLOCAL)...", "flags"),
             ("Commands of my own...", "own"),
         ],
@@ -222,9 +223,11 @@ def pick_starter(key: str) -> None:
     templates/template.<ext>), a file of yours anywhere, or the built-in one
     copied to templates/ to change it."""
     own = paths.templates_dir() / f"template.{key}"
-    usual = f"Yours: {short(own)}" if own.is_file() else _recommended("The built-in one")
     conf = settings().language_settings(key)
-    choices = [(usual, DEFAULT)]
+    if own.is_file():
+        choices = [(ui.row(f"Yours: {short(own)}", "", RECOMMENDED), DEFAULT)]
+    else:
+        choices = [(ui.row("The built-in one", "", RECOMMENDED), DEFAULT)]
     if conf.template:
         choices.append((conf.template, conf.template))
     choices.append(("A file of mine...", OTHER))
@@ -238,14 +241,14 @@ def pick_starter(key: str) -> None:
     if picked == "copy":
         paths.write_atomic(own, languages.LANGUAGES[key].starter)
         settings().remove("template", table=key)
-        ui.green(f"Wrote {short(own)}: change it as you like; cf get starts from it")
+        ui.success(f"Wrote {short(own)}: change it as you like; cf get starts from it")
         return
     if picked == OTHER:
         picked = ui.path(
-            "The file:",
+            "The file (Tab completes):",
             validate=lambda s: (bool(s.strip()) and Path(s.strip()).expanduser().is_file())
             or "Not a file",
-        ).strip()
+        )
     if picked == DEFAULT:
         settings().remove("template", table=key)
     else:
@@ -274,7 +277,7 @@ def edit_file() -> None:
     try:
         current = settings()
     except CFError as e:  # NOTE: a broken file is opened all the same, to fix it
-        ui.yellow(str(e))
+        ui.warn(str(e))
         current = None
     if current is not None and not path.exists():
         current.write_default()
@@ -285,12 +288,12 @@ def edit_file() -> None:
     except CFError as e:
         raise CFError(f"{e}\nRun cf config --edit again to fix it") from e
     for warning in reloaded.warnings:
-        ui.yellow(warning)
-    ui.green(f"Saved {short(path)}")
+        ui.warn(warning)
+    ui.success(f"Saved {short(path)}")
 
 
 # ┌──────────────────────────────────────────────────────────┐
-# │                        The menus                         │
+# │                        The menu                          │
 # └──────────────────────────────────────────────────────────┘
 
 _PICKERS = {
@@ -301,82 +304,83 @@ _PICKERS = {
 }
 
 
-def _language_rows(key: str, offered: dict[str, str], prefix: str) -> list[tuple[str, tuple]]:
-    rows = [(_row(f"{prefix}submitted as", _submit_text(key, offered)), ("submit", key))]
-    if key in languages.LANGUAGES:  # NOTE: a language of config.toml's own: edit the file
-        rows = [
-            (_row(f"{prefix}compiler", _compiler_text(key)), ("compiler", key)),
-            *rows,
-            (_row(f"{prefix}build and run", _commands_text(key)), ("commands", key)),
-            (_row(f"{prefix}starter code", _starter_text(key)), ("template", key)),
-        ]
+def _shown_languages() -> tuple[list[str], list[str]]:
+    """(the languages the menu shows, those it leaves out): the one for new
+    problems first, then those installed here or set in config.toml."""
+    current = settings()
+    main = current.language or "cpp"
+    shown, missing = [main], []
+    for key in LISTED:
+        if key == main:
+            continue
+        if key in current.languages or _tools(key):
+            shown.append(key)
+        else:
+            missing.append(key)
+    shown += [k for k in current.languages if k not in languages.LANGUAGES and k not in shown]
+    return shown, missing
+
+
+def _language_rows(key: str, offered: dict[str, str]) -> list:
+    rows: list = [ui.Heading(f"── {languages.display_name(key)} ──")]
+    if key in languages.LANGUAGES:
+        rows.append((_compiler_row(key), ("compiler", key)))
+    rows.append((_submit_row(key, offered), ("submit", key)))
+    if key in languages.LANGUAGES:  # NOTE: config.toml's own languages: edit the file
+        rows.append((_commands_row(key), ("commands", key)))
+        rows.append((_starter_row(key), ("template", key)))
     return rows
 
 
-def _do(action) -> None:
-    if isinstance(action, tuple):
-        _PICKERS[action[0]](action[1])
-    elif action == "language":
-        pick_language()
-    elif action == "proxy":
-        pick_proxy()
-    elif action == "login":
-        ask_login(client())
-    elif action == "edit":
-        edit_file()
-
-
-def language_menu(key: str) -> None:
-    """The settings of one language, until Back."""
-    action = None
-    while True:
-        rows = _language_rows(key, _offered(), "")
-        values = [value for _, value in rows]
-        action = ui.select(
-            f"{languages.display_name(key)} settings:",
-            [*rows, ("Back", "back")],
-            default=action if action in values else values[0],
-        )
-        if action == "back":
-            return
-        _do(action)
-
-
 def menu() -> None:
-    """cf config: the settings, until Done."""
+    """cf config: every setting in one list, until Done or Esc."""
     action = "language"
     while True:
         current = settings()
-        key = current.language or "cpp"
-        name = languages.display_name(key)
-        rows = [
+        offered = _offered()
+        shown, missing = _shown_languages()
+        who = client().handle or "not logged in"
+        rows: list = [
+            ui.Heading("── General ──"),
             (
-                _row("Language", name if current.language else f"not picked yet ({name})"),
+                ui.row(
+                    "Language for new problems",
+                    languages.display_name(current.language or "cpp"),
+                    "" if current.language else "not picked yet",
+                ),
                 "language",
             ),
-            *_language_rows(key, _offered(), f"{name} "),
-            ("Another language's settings...", "other"),
-            (_row("Proxy", current.proxy or "none"), "proxy"),
-            (_row("Login", client().handle or "not logged in"), "login"),
+            (ui.row("Proxy", current.proxy or "none"), "proxy"),
+        ]
+        for key in shown:
+            rows += _language_rows(key, offered)
+        if missing:
+            names = ", ".join(languages.display_name(k) for k in missing)
+            rows.append(ui.Heading(f"── not installed here: {names} ──"))
+        rows += [
+            ui.Heading(""),
             ("Edit config.toml in your editor", "edit"),
             ("Done", "done"),
         ]
-        values = [value for _, value in rows]
-        action = ui.select(
-            f"Settings (saved in {short(current.file)}); Enter changes one:",
-            rows,
-            default=action if action in values else "language",
-        )
+        values = [r[1] for r in rows if not isinstance(r, ui.Heading)]
+        try:
+            action = ui.select(
+                f"cf-tool settings · {who} · {short(current.file)}",
+                rows,
+                default=action if action in values else "language",
+            )
+        except ui.Canceled:
+            return  # NOTE: Esc on the menu itself: done
         if action == "done":
             return
-        if action == "other":
-            keys = [
-                *languages.LANGUAGES,
-                *(k for k in current.languages if k not in languages.LANGUAGES),
-            ]
-            other = ui.select(
-                "Which language?", [(languages.display_name(k), k) for k in keys if k != key]
-            )
-            language_menu(other)
-            continue
-        _do(action)
+        try:
+            if isinstance(action, tuple):
+                _PICKERS[action[0]](action[1])
+            elif action == "language":
+                pick_language()
+            elif action == "proxy":
+                pick_proxy()
+            elif action == "edit":
+                edit_file()
+        except ui.Canceled:
+            pass  # NOTE: Esc in a list: back to the menu

@@ -126,21 +126,25 @@ Everything works without settings: cf finds your compiler, picks the newest Code
 language, and starts you from a built-in template. To change something, run `cf config`:
 
 ```
-? Settings (saved in ~/.config/cf/config.toml); Enter changes one:
- » 1) Language                C++
-   2) C++ compiler            GCC 14 (g++-14) (recommended)
-   3) C++ submitted as        GNU G++23 14.2 (64 bit, msys2) (recommended)
-   4) C++ build and run       recommended
-   5) C++ starter code        built-in (recommended)
-   6) Another language's settings...
-   7) Proxy                   none
-   8) Login                   tourist
+◆ cf-tool settings · tourist · ~/.config/cf/config.toml
+   ── General ──
+ ❯ 1) Language for new problems   C++
+   2) Proxy                       none
+   ── C++ ──
+   3) Compiler                    GCC 14 (g++-14)  recommended
+   4) Submitted as                GNU G++23 14.2 (64 bit, msys2)  recommended
+   5) Build and run               the recommended commands  recommended
+   6) Starter code                the built-in one  recommended
+   ── Python ──
+   7) Interpreter                 Python 3.13 (python3)  recommended
+   8) Submitted as                PyPy 3.10 (7.3.15, 64bit)  recommended
+   ...
    9) Edit config.toml in your editor
    0) Done
 ```
 
-Each choice opens a list whose first item is the recommended one, already selected, so Enter
-keeps it.
+Every language installed here is in the same list. Each setting opens a list whose first
+item is the recommended one, already selected, so Enter keeps it; Esc goes back.
 
 - **Compiler.** The best one found here comes first (GCC before clang); the others found,
   or any program, are there too. C++ is compiled with the standard of the Codeforces
