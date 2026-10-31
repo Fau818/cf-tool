@@ -7,14 +7,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cf-tool is a Python CLI for Codeforces: `cf get` sets up a contest's problems (folders,
 samples, starter code), `cf test` builds and runs your code on them, `cf submit` submits
 and shows the verdict. It began as a port of the Go [xalanq/cf-tool](https://github.com/xalanq/cf-tool),
-but since 0.4.0 it follows its own model (no templates or scripts, one folder per
+but since 1.0.0 it follows its own model (no templates or scripts, one folder per
 problem); don't reintroduce the Go tool's ways for fidelity's sake.
 
-- Distribution name: `cf-tool`, package: `cf_tool`, CLI command: `cf`. Published on
-  GitHub (Fau818/cf-tool); PyPI publishing starts with 0.4.0 (`.github/workflows/release.yml`,
-  trusted publishing) — until the first upload, the install is
-  `uv tool install git+https://github.com/Fau818/cf-tool`.
-- Versions are PEP 440 (`0.4.0`, `0.5.0a1`), tags `v<version>`; bump `pyproject.toml` and
+- Distribution name: `cf-tool-cli` (PyPI refuses `cf-tool` as too similar to `cftool`),
+  package: `cf_tool`, CLI command: `cf`, repository: GitHub Fau818/cf-tool. Pushing a
+  `v<version>` tag publishes to PyPI (`.github/workflows/release.yml`, trusted
+  publishing); the GitHub release (`gh release create`, notes from CHANGELOG.md) is made
+  by hand.
+- Versions are PEP 440 (`1.0.0`, `1.1.0a1`), tags `v<version>`; bump `pyproject.toml` and
   `cf_tool/__init__.py` together, run `uv lock`, and add a CHANGELOG.md entry. `cf
   upgrade` reads GitHub releases (pre-releases only for users already on one).
 - Supported Python: 3.10+ (CI runs 3.10–3.13 on Linux, 3.13 on macOS/Windows;
@@ -105,7 +106,9 @@ cf_tool/
   path, the file menu and the first-run language question decide or fail with a message,
   never wait on stdin.
 - **Login tiers** (gateway.py `login()`): 1 plain HTTP GET+POST /enter (keeps Cloudflare
-  cookies, drops old login ones) → 2 headless browser → 3 browser window.
+  cookies, drops old login ones) → 2 headless browser → 3 browser window. Since Oct 2026
+  tier 1 never gets through (a check page stands in front of /enter), so tier 2 is the
+  usual way in: a check page there is no reason for a warning.
   `LoginRejected` and `BrowserUnavailable` stop the climb — never open a window for those.
   `get_authed()` re-logs in once when the handle marker is missing; a 5xx page is an
   error, never "logged out".
@@ -114,7 +117,8 @@ cf_tool/
   profile's session is anonymous). Browser work, logins and session saves share one lock;
   requests run one at a time (curl_cffi writes the whole jar back after each request).
 - **Gate markers**: Cloudflare's interstitial = `<title>Just a moment` / `_cf_chl_opt`;
-  Codeforces' own Turnstile gate = `/data/turnstile`. Never use `challenge-platform`:
+  Codeforces' own Turnstile gate = `/data/turnstile`; its check in front of /enter (when
+  cf_clearance is valid) = `Your browser is being checked`. Never use `challenge-platform`:
   every normal page embeds Cloudflare's `/cdn-cgi/challenge-platform/scripts/jsd/` script.
 - **cf_clearance is bound to the User-Agent and IP**: cookies exported from the browser
   travel with its UA (`Gateway._adopt`), and the browser uses the configured proxy.
@@ -130,9 +134,10 @@ cf_tool/
   literally; mixed styles via `ui.line()` or `Text` (sample I/O like `a[i]`, `[/]`, `:x:`
   must survive). Machine-read output (`cf config --path`) goes through `click.echo`.
 - **CP Editor calls cf** (its src/Extensions/CFTool.cpp): it reads `v<x.y.z>` from
-  `cf --version` (keep the `v`), runs `cf submit <contest> <problem> <file>` for major
-  version 0 (`-f <file> <url>` from 1), and reads `status: <verdict>` from stdout
-  (unboxed when not a terminal). Keep all three working, and no prompts in that path.
+  `cf --version` (keep the `v`), runs `cf submit -f <file> <url>` from major version 1
+  (`cf submit <contest> <problem> <file>` for 0.x, still understood), and reads
+  `status: <verdict>` from stdout (unboxed when not a terminal). Keep all three working,
+  and no prompts in that path.
 - **questionary quirks** (`ui.select`): it paints the default as "selected" (reverse
   video) — cleared; Meta-Enter submits the hidden input line as "" — Esc is bound to
   cancel and non-item answers count as canceled. Off a terminal, menus are numbered from

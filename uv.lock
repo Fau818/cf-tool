@@ -81,8 +81,8 @@ wheels = [
 ]
 
 [[package]]
-name = "cf-tool"
-version = "0.4.0"
+name = "cf-tool-cli"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },

@@ -127,7 +127,7 @@ def test_help_lists_the_new_names_only():
 def test_version_as_cp_editor_reads_it():
     output = run("--version").output
     version = re.search(r"(?<=v)\d+\.\d+\.\d+", output).group()  # NOTE: CP Editor's regex
-    assert version.split(".")[0] == "0"  # NOTE: so it submits with: cf submit 546 D <file>
+    assert version.split(".")[0] == "1"  # NOTE: so it submits with: cf submit -f <file> <url>
 
 
 def test_old_settings_move_on_the_first_run(home):
@@ -456,6 +456,23 @@ def test_submit_as_cp_editor_calls_it(fake_submit):
     assert fake_submit["menus"] == [] and fake_submit["questions"] == []
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://codeforces.com/contest/546/problem/D",
+        "https://codeforces.com/problemset/problem/546/D",
+    ],
+)
+def test_submit_as_cp_editor_calls_cf_1(fake_submit, url):
+    fake_submit["terminal"] = False
+    make_code(fake_submit["dir"], "sol.py", "other.py")
+    full_path = str(fake_submit["dir"] / "sol.py")
+    result = run("submit", "-f", full_path, url)
+    assert result.exit_code == 0, result.output
+    assert fake_submit["submitted"] == [(full_path, "546D", "70")]
+    assert fake_submit["menus"] == [] and fake_submit["questions"] == []
+
+
 def test_off_a_terminal_nothing_is_asked(fake_submit):
     fake_submit["terminal"] = False
     make_code(fake_submit["dir"], "546D.py")
@@ -750,9 +767,9 @@ def test_upgrade(monkeypatch):
     assert result.exit_code == 1 and "No release" in result.output
     result = _upgrade_with(monkeypatch, [], "0.3.0a1", status=404)
     assert result.exit_code == 1 and "Cannot list the releases" in result.output
-    stable = [{"tag_name": "v0.4.1", "prerelease": False, "draft": False}]
-    result = _upgrade_with(monkeypatch, stable, "0.4.0")
-    assert "uv tool upgrade cf-tool" in result.output and "@v0.4.1" in result.output
+    stable = [{"tag_name": "v1.0.1", "prerelease": False, "draft": False}]
+    result = _upgrade_with(monkeypatch, stable, "1.0.0")
+    assert "uv tool upgrade cf-tool-cli" in result.output and "@v1.0.1" in result.output
 
 
 # ┌──────────────────────────────────────────────────────────┐

@@ -1,9 +1,9 @@
 name: Release
 
-# Publishes cf-tool to PyPI when a version tag (v0.4.0) is pushed. PyPI trusts
-# this workflow (trusted publishing), so no token is stored anywhere. One-time
-# setup on pypi.org: a (pending) publisher for owner Fau818, repository cf-tool,
-# workflow release.yml, environment pypi.
+# Publishes cf-tool to PyPI (as cf-tool-cli) when a version tag (v1.0.0) is pushed.
+# PyPI trusts this workflow (trusted publishing), so no token is stored anywhere.
+# Set up on pypi.org: a publisher for project cf-tool-cli, owner Fau818, repository
+# cf-tool, workflow release.yml, environment pypi.
 on:
   push:
     tags: ["v*"]

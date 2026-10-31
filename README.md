@@ -27,15 +27,16 @@ Submitting 2171A (a.cpp) as GNU G++23 14.2 (64 bit, msys2), logged in as you
 ## Install
 
 You need Python 3.10 or newer, and a compiler or interpreter for your language
-(`g++`, `python3`, ...). Google Chrome or Chromium is needed only when Cloudflare checks
-the login.
+(`g++`, `python3`, ...). Logging in needs Google Chrome or Chromium: Codeforces lets only
+browsers through its login page, so cf logs in with one in the background.
 
 ```bash
-uv tool install cf-tool       # or: pipx install cf-tool
+uv tool install cf-tool-cli   # or: pipx install cf-tool-cli
 ```
 
-The newest code, straight from GitHub: `uv tool install git+https://github.com/Fau818/cf-tool`.
-`cf upgrade` tells you when there is a newer version.
+That gives you the `cf` command. The newest code, straight from GitHub:
+`uv tool install git+https://github.com/Fau818/cf-tool`. `cf upgrade` tells you when there
+is a newer version.
 
 ## Getting started
 
@@ -197,6 +198,8 @@ forgets it.
 
 ## Coming from cf-tool 0.3
 
+- cf-tool is on PyPI now, as `cf-tool-cli`. Swap your install once: `uv tool uninstall
+  cf-tool`, then `uv tool install cf-tool-cli` (or the same with pipx).
 - Your settings move to `config.toml` by themselves on the first run: your starter files,
   your languages, host and proxy. Build scripts aren't needed any more; cf says what it
   left out.

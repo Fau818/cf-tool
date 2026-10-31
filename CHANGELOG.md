@@ -1,8 +1,10 @@
 # Changelog
 
-## 0.4.0 (2026-11)
+## 1.0.0 (2026-10)
 
 A new cf-tool: it no longer follows the Go cf-tool's model, and needs no setup.
+
+- **On PyPI** as `cf-tool-cli`: `uv tool install cf-tool-cli`. The command is still `cf`.
 
 - **No templates, no scripts.** The file extension picks the language, and cf finds the
   compiler (GCC first) when it needs one. Settings are optional: `cf config` changes them

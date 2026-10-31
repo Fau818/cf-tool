@@ -186,7 +186,7 @@ def upgrade() -> None:
         return
     ui.green(f"Latest version is {latest}. Upgrade with:")
     if latest_key[-2] == 3:  # NOTE: a release, not a pre-release: on PyPI
-        ui.plain("  uv tool upgrade cf-tool        (or: pipx upgrade cf-tool)")
+        ui.plain("  uv tool upgrade cf-tool-cli    (or: pipx upgrade cf-tool-cli)")
         ui.plain("Installed from GitHub:")
     ui.plain(f"  uv tool install --force git+https://github.com/{REPOSITORY}@{latest}")
     ui.plain(f"  (or: pipx install --force git+https://github.com/{REPOSITORY}@{latest})")

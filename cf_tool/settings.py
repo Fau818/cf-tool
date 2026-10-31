@@ -371,7 +371,7 @@ def migrate(sources: list[Path] | None = None, target: Path | None = None) -> li
 
 
 def _new_placeholders(script: str) -> str:
-    """A 0.3 script with 0.4's placeholders. It runs in the code's folder, so
+    """A 0.3 script with today's placeholders. It runs in the code's folder, so
     the folder ($%path%$) becomes ./ ({src} names the file with its folder)."""
     for old, new in (
         ("$%path%$$%full%$", "{src}"),
