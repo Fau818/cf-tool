@@ -3,7 +3,8 @@
 A generator prints one test for the seed it gets as its argument, and the
 brute force's output is that test's answer. The first test the solution
 fails is saved among the problem's tests (tests/stress-<seed>), so cf test
-keeps checking it. All three are built and run like any code file, in any
+keeps checking it; each cf stress first brings those answers up to date with
+the brute force. All three are built and run like any code file, in any
 language cf-tool knows.
 """
 
@@ -67,6 +68,7 @@ def stress(
     - the brute force answers it
     - the solution runs on it, and its output is compared with that answer"""
     timeout = judge.timeout_for(time_limit)
+    refresh(folder, brute)
     with ui.status("Stress testing...") as show:
         for test_seed in range(seed, seed + tests):
             show(f"Test {test_seed - seed + 1} of {tests} (seed {test_seed})...")
@@ -89,6 +91,39 @@ def stress(
             return _report(folder, test_seed, made.stdout, result, answer.stdout, said, check)
     ui.green(f"All {tests} tests passed (seeds {seed} to {seed + tests - 1})")
     return None
+
+
+def refresh(folder: Path, brute: Program) -> None:
+    """Bring the answers of tests saved by an earlier cf stress (stress-*) up
+    to date with the brute force as it is now, and say which changed: one
+    saved while the brute force was wrong fails cf test for nothing.
+    - an answer the brute force still gives: left alone
+    - another answer: replaced, and named in a note
+    - a brute force that fails on the input (an older generator's?): left,
+      with a note"""
+    changed, failing = [], []
+    for test in workspace.tests_of(folder):
+        if not test.name.startswith("stress-") or test.answer is None:
+            continue
+        answer = brute.run(stdin=test.input, timeout=BRUTE_TIMEOUT)
+        if not answer.ok:
+            failing.append(test.name)
+            continue
+        now = answer.stdout.decode(errors="replace")
+        if same_output(now, test.answer.read_text(encoding="utf-8", errors="replace"), Check()):
+            continue
+        test.answer.write_text(now, encoding="utf-8", newline="")
+        changed.append(test.name)
+    if changed:
+        ui.cyan(
+            f"Updated the answers of {', '.join(changed)} (saved by an earlier cf stress) "
+            f"to what {brute.name} prints now"
+        )
+    if failing:
+        ui.yellow(
+            f"{brute.name} fails on {', '.join(failing)} (saved by an earlier cf stress): "
+            "if they came from an older generator, delete them from tests/"
+        )
 
 
 def _report(

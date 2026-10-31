@@ -245,6 +245,12 @@ def test(
             solution, current, info=info, check=check, accept=accept, interactor=interactor_program
         )
         judge.remember(path, summary)
+        stressed = [name for name in summary.failed if name.startswith("stress-")]
+        if stressed:
+            ui.dim(
+                f"{', '.join(stressed)}: saved by cf stress, with the brute force's answer "
+                "(the next cf stress updates it if the brute force changed)"
+            )
         # NOTE: an output unlike the sample's isn't confirmed right either
         if (summary.failed or summary.differs) and not watch_it:
             sys.exit(1)

@@ -42,6 +42,23 @@ def test_finds_a_difference_and_keeps_it(tmp_path, capsys):
     assert [t.name for t in tests_of(tmp_path)] == [saved.name]
 
 
+def test_saved_answers_follow_the_brute_force(tmp_path, capsys):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "stress-3.in").write_text("4\n")
+    (tests / "stress-3.ans").write_text("11\n")  # NOTE: from a brute force since fixed
+    (tests / "stress-5.in").write_text("x\n")  # NOTE: from an older generator
+    (tests / "stress-5.ans").write_text("0\n")
+    (tests / "stress-8.in").write_text("2\n")
+    (tests / "stress-8.ans").write_text("3\n")  # NOTE: right: left alone
+    stress(tmp_path, *programs(tmp_path, RIGHT), tests=3)
+    assert (tests / "stress-3.ans").read_text() == "10\n"
+    assert (tests / "stress-5.ans").read_text() == "0\n"
+    out = " ".join(capsys.readouterr().out.split())
+    assert "Updated the answers of stress-3 (saved by an earlier cf stress)" in out
+    assert "brute.py fails on stress-5" in out and "stress-8" not in out
+
+
 def test_all_tests_pass(tmp_path, capsys):
     assert stress(tmp_path, *programs(tmp_path, RIGHT), tests=20, seed=5) is None
     assert "All 20 tests passed (seeds 5 to 24)" in capsys.readouterr().out

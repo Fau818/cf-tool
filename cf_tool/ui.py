@@ -13,6 +13,7 @@ otherwise (pipes, CI, the test harness) so nothing hangs waiting on a TTY.
 from __future__ import annotations
 
 import contextlib
+import os
 import sys
 from dataclasses import dataclass
 from typing import Callable, Iterator, Sequence, TypeVar
@@ -22,7 +23,20 @@ from rich.console import Console
 from rich.errors import LiveError
 from rich.text import Text
 
-console = Console(highlight=False, emoji=False)  # NOTE: ":x:" in a sample is text
+WIDE = 200  # columns when no terminal tells the width (a log, a pipe, an AI agent)
+
+
+def _width() -> int | None:
+    """The console's width: the terminal's (None lets Rich ask it), COLUMNS's,
+    or WIDE without either, so tables and messages aren't cut at 80."""
+    streams = (sys.stdin, sys.stdout, sys.stderr)
+    columns = os.environ.get("COLUMNS", "")
+    if columns.isdigit() and int(columns) > 0:  # NOTE: zsh can export COLUMNS=0
+        return None
+    return None if any(s is not None and s.isatty() for s in streams) else WIDE
+
+
+console = Console(highlight=False, emoji=False, width=_width())  # NOTE: ":x:" in a sample is text
 
 # The palette: soft colors that read well on dark and light terminals. Plain
 # color names in styles ("green", "bold cyan") are drawn in these, so every

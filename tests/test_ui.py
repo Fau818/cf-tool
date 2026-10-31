@@ -15,6 +15,19 @@ from cf_tool import ui
 CHOICES = [("a.cpp", "a"), ("b.cpp", "b"), ui.Heading("── other files ──"), ("c.cpp", "c")]
 
 
+def test_without_a_terminal_lines_are_not_cut_at_80(monkeypatch):
+    piped = SimpleNamespace(isatty=lambda: False)
+    for name in ("stdin", "stdout", "stderr"):
+        monkeypatch.setattr(ui.sys, name, piped)
+    monkeypatch.delenv("COLUMNS", raising=False)
+    assert ui._width() == ui.WIDE
+    monkeypatch.setenv("COLUMNS", "100")
+    assert ui._width() is None  # NOTE: Rich reads COLUMNS itself
+    monkeypatch.delenv("COLUMNS")
+    monkeypatch.setattr(ui.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    assert ui._width() is None  # NOTE: a terminal tells the width
+
+
 def test_fallback_numbers_only_the_choices(monkeypatch, capsys):
     monkeypatch.setattr(ui, "interactive", lambda: False)
     monkeypatch.setattr(ui, "choose_index", lambda n, default: n - 1)  # NOTE: the last of n
