@@ -18,6 +18,8 @@ problem); don't reintroduce the Go tool's ways for fidelity's sake.
 - Versions are PEP 440 (`1.0.0`, `1.1.0a1`), tags `v<version>`; bump `pyproject.toml` and
   `cf_tool/__init__.py` together, run `uv lock`, and add a CHANGELOG.md entry. `cf
   upgrade` reads GitHub releases (pre-releases only for users already on one).
+- README.md stays short: what cf does, with pictures (docs/images, drawn by the local
+  dev/screenshots.py, then dev/svg2png.sh); the details live in docs/guide.md.
 - Supported Python: 3.10+ (CI runs 3.10–3.13 on Linux, 3.13 on macOS/Windows;
   Windows is experimental).
 
