@@ -1,226 +1,316 @@
-# cf-tool 0.4.0 重写计划
+# cf-tool 0.4.0 rewrite plan
 
-工作分支 `v0.4`（发布前删掉本文件）。目标：不再沿用 Go 版 cf-tool 的模型，做一个开箱即用的新版本。
+Branch `v0.4` (delete this file before the release). Goal: drop the Go cf-tool's model and
+ship a version that works out of the box.
 
-## 1. 为什么要重写（调查结论）
+## 1. Why rewrite (what the investigation found)
 
-以 Fau 自己的 `~/.config/cf/config` 为例：
+Fau's own `~/.config/cf/config` shows the problem:
 
-- 三个 template 里 `cpp` 和 `cpp17` 都认 `.cpp`，于是每次 `cf test` / `cf submit` 都先问用哪个模板。
-- 默认模板 `cpp17` 没有编译脚本，`cf test` 跑的是旧的（或根本不存在的）`./a`；`cpp` 的 after_script 还会把它删掉。`cf doctor` 却报告它“ready”。
-- `cpp` 本地用 `-std=c++23` 编译，却以 G++20（id 89）提交：本地能编译的代码到 CF 上可能 CE。
-- 0.3.1 的向导写死 `-std=c++20`，却默认选 G++23 提交；把配置目录的绝对路径写进脚本；用户拒绝“替换模板”时，起始代码文件已经写好了。
+- Two of its three templates (`cpp`, `cpp17`) claim `.cpp`, so every `cf test` and `cf submit`
+  first asks which template to use.
+- The default template, `cpp17`, has no compile script: `cf test` runs a stale (or missing)
+  `./a`, which `cpp`'s after_script deletes. `cf doctor` calls it "ready".
+- `cpp` compiles with `-std=c++23` but submits as G++20 (id 89): code that compiles here can
+  get a compilation error on Codeforces.
+- The 0.3.1 wizard hard-codes `-std=c++20` but submits as G++23, bakes the config folder's
+  absolute path into the script, and writes the starter file before asking "Replace your
+  template?".
 
-根源：一个 template 同时管四件事：起始代码、编译运行脚本（`before_script/script/after_script` 和 `$%full%$` 占位符）、提交用的 CF 语言 id、后缀和别名。全部要用户手写。
+The root cause: one "template" bundles four things — starter code, build/run scripts
+(`before_script`/`script`/`after_script` with `$%full%$` placeholders), the Codeforces
+language id, and suffixes plus an alias — and the user writes all of them by hand.
 
-Go 留下的其他包袱：
+The Go tool's other baggage:
 
-- 目录：`cf/contest/2050/a/` 很深，`in1.txt` / `ans1.txt` 和代码混在一起；靠目录名猜题目，还要配 `folder_name`。
-- 流程：parse 和 gen 分两步，外加 `gen_after_parse` 开关；每次 test 都重新编译（C++ 每次约 1.5 s），编译产物留在题目目录里，靠 rm 脚本清理。
-- 比较：按“每行去首尾空白”，比 CF 的检查器严，多一个空行或空格就判错。
-- 界面：命令名 stand / sid / list / watch 难懂；配置是 JSON 加菜单。
+- Layout: deep `cf/contest/2050/a/` folders with `in1.txt`/`ans1.txt` next to the code; the
+  problem is guessed from folder names, which needs the `folder_name` setting.
+- Flow: parse and gen are two steps (plus a `gen_after_parse` switch); every `cf test`
+  recompiles (about 1.5 s for C++), and builds land in the problem folder, removed by an rm
+  script.
+- Comparison: trimmed lines, stricter than Codeforces' checkers (an extra blank line or
+  space fails).
+- Interface: obscure command names (stand, sid, list, watch); a JSON config behind a menu.
 
-其他工具的做法（oj、acc、cargo-compete、cpbooster、cph / cph-ng、CP Editor、CompetiTest.nvim 等）：
+What other tools do (oj, acc, cargo-compete, cpbooster, cph/cph-ng, CP Editor,
+CompetiTest.nvim, ...):
 
-- 按扩展名认语言，默认就能用，用户最多改编译器和参数。
-- 源文件和输出路径由工具补上，编译和运行分开，没有 before/after 钩子。
-- 题目身份记在数据文件里，而不是目录名；测试放在 `tests/`（`.in` 和 `.ans`）。
-- 提交语言来自 CF 的实时列表；编译缓存以源码哈希为键，二进制放在源码目录外面。
-- 提交的 POST 绝不重发。
+- The file extension picks the language; defaults work; users change at most the compiler
+  and its flags.
+- The tool supplies the source and output paths; build and run are separate; no
+  before/after hooks.
+- A problem's identity lives in a data file, not in folder names; tests live in `tests/`
+  (`.in` with `.ans`).
+- The judge's language comes from its live list; builds are cached by source hash, outside
+  the source folder.
+- A submission's POST is never resent.
 
-xalanq/cf-tool 已归档，issue 里抱怨的正是这几点：两个模板共用一个后缀、语言 id 过期、目录太深。
+xalanq/cf-tool is archived; its issues complain about exactly these: two templates sharing
+a suffix, stale language ids, folders too deep.
 
-## 2. 已定的决定（2026-10-31）
+## 2. Decisions (Fau, 2026-10-31)
 
-- **目录**：每题一个目录，`2050/a/` 下面是 `a.cpp`、`tests/1.in`、`tests/1.ans` 和 `.cf-problem.json`。
-- **配置**：以 `~/.config/cf/config.toml` 为主，带注释，所有项都可选；`cf config` 用编辑器打开它；另有 `cf login`、`cf langs` 等命令。
-- **命令**：换成新名字；旧名作为隐藏别名，照样能用。
-- **0.4.0 一并做**：`cf test --watch`、交互题（`--interactor`）、发布到 PyPI。
-- **以后再做**：提交前展开本地 `#include`、用 API 看评测、bits/stdc++.h 预编译头。
+- **Layout**: one folder per problem: `2050/a/` holds `a.cpp`, `tests/1.in`, `tests/1.ans`
+  and `.cf-problem.json`.
+- **Settings**: `~/.config/cf/config.toml` first, commented, every key optional; `cf config`
+  opens it in the editor; plus commands like `cf login` and `cf langs`.
+- **Commands**: new names; the old names keep working as hidden aliases.
+- **Also in 0.4.0**: `cf test --watch`, interactive problems (`--interactor`), publishing to
+  PyPI.
+- **Later**: inlining local `#include`s before submitting, verdicts through the API, a
+  precompiled bits/stdc++.h.
+- **Docs**: README rewritten as a whole, English only (no Chinese version).
+- **Work in English** throughout (plans, code, comments, commits, docs).
 
-## 3. 新设计
+## 3. New design
 
-### 原则
+### Principles
 
-1. 零配置：按扩展名认语言，用到时才找编译器；不登录也能 get 和 test，到 submit 才就地登录。
-2. 只有一个概念：语言。内置默认值，想改哪项只写那一项。
-3. 本地和评测机一致：`-std` 跟着提交语言走；比较方式和 CF 默认检查器一样按 token；误差和大小写规则来自题面。
-4. 题目目录自描述：用 `.cf-problem.json` 认题，不需要根目录配置。
-5. 目录保持干净：编译产物放在缓存里，源码不变就不重编，不需要清理脚本。
+1. No setup: the extension picks the language, compilers are found when needed; get and test
+   work without logging in, and submit logs in on the spot.
+2. One concept: a language. Built-in defaults; override only the key you care about.
+3. Local matches the judge: `-std` follows the submit language; outputs are compared by
+   tokens like Codeforces' default checkers, with the statement's error and letter-case
+   rules.
+4. Self-describing folders: `.cf-problem.json` names the problem; no root-folder setting.
+5. Clean folders: builds live in a cache, an unchanged source isn't rebuilt, no cleanup
+   scripts.
 
-### 日常用法
+### Everyday use
 
 ```
-cf get 2050        # 建 2050/a … 2050/h：样例 + 起始代码（一次请求拿到整场比赛）
+cf get 2050        # 2050/a … 2050/h: samples + starter code (one request for the contest)
 cd 2050/a
-cf test            # 编译（有缓存）并跑样例；-w 保存即重测
-cf submit          # 没登录就当场登录，然后实时显示评测
-cf test b          # 在 2050/ 里也行
+cf test            # build (cached) and run the samples; -w re-tests on save
+cf submit          # logs in on the spot if needed, then shows the verdict live
+cf test b          # works from 2050/ too
 ```
 
-### 目录
+### Layout
 
 ```
-2050/                  比赛目录
-  a/                   题目目录
-    a.cpp              起始代码；目录里已有这个语言的代码时不写
-    tests/1.in 1.ans   样例；自己加的测试也放这里，任意名字的 .in/.ans 成对
-    .cf-problem.json   url、题名、时空限制、交互、误差、大小写、多组样例的分行
+2050/                  contest folder
+  a/                   problem folder
+    a.cpp              starter code; not written when the folder has code in that language
+    tests/1.in 1.ans   samples; your own tests too: any name, .in with .ans
+    .cf-problem.json   url, name, limits, interactive, error, letter case, sample line cases
 ```
 
-- **放在哪里**：在比赛或题目目录里运行 `cf get`，新比赛放在当前比赛目录旁边；配置了 `root` 就放在 root 下；否则放在当前目录。
-- **其他题型**：gym 用 `<gym id>/`；group 用 `<contest id>/`，group id 记在元数据里；acmsguru 用 `acmsguru/<题号>/`。
-- **重跑 `cf get`**：只更新样例和元数据，不碰代码。
-- **辅助文件**：`gen.*`、`brute.*`、`checker.*`、`interactor.*` 不当作 test/submit 的候选，`cf stress` 默认就用它们。
-- **0.3 的旧目录**（`in1.txt` / `ans1.txt`、`cf/contest/x/y/`）照样能测、能交。散放的 `546D.cpp` 也照旧能用。
-- **多个候选文件**：保持现在的规则，一定弹菜单，本题的文件在前，新的在前，标出修改时间。
+- **Where**: run from inside a contest or problem folder, `cf get` puts new contests next to
+  the current contest folder; with `root` set, under root; otherwise in the current folder.
+- **Other kinds**: gym → `<gym id>/`; group → `<contest id>/` (the group id is in the
+  metadata); acmsguru → `acmsguru/<problem>/`.
+- **Running `cf get` again** refreshes tests and metadata, never code.
+- **Helpers**: `gen.*`, `brute.*`, `checker.*`, `interactor.*` are not candidates for
+  test/submit; `cf stress` uses them by default.
+- **0.3 folders** (`in1.txt`/`ans1.txt`, `cf/contest/x/y/`) can still be tested and
+  submitted; loose files like `546D.cpp` keep working.
+- **Several candidate files**: same rule as now — always the menu, this problem's files
+  first, newest first, with edit times.
 
-### 配置文件 `~/.config/cf/config.toml`
+### Settings: `~/.config/cf/config.toml`
 
-用 tomlkit 读写，保留注释。
+Read and written with tomlkit, so comments survive.
 
 ```toml
-language = "cpp"              # cf get 写起始代码用的语言（第一次 cf get 时询问并写入）
-# root = "~/codeforces"       # cf get 放比赛的地方（默认：当前目录）
+language = "cpp"              # what cf get writes starter code in (asked on the first cf get)
+# root = "~/codeforces"       # where cf get puts contests (default: the current folder)
 # host = "https://codeforces.com"
-# proxy = "socks5://127.0.0.1:1080"   # 默认：跟随环境变量
+# proxy = "socks5://127.0.0.1:1080"   # default: the environment's
 
-# [cpp]                       # 每种语言一节，按扩展名
-# compiler = "g++-15"         # 默认：自动找（GCC 优先）
-# flags = "-DLOCAL"           # 追加到默认参数之后
-# submit = "G++20"            # CF 语言：名字（或其中一段）或 id；默认：最新的
+# [cpp]                       # one table per language, by file extension
+# compiler = "g++-15"         # default: found on this machine, GCC first
+# flags = "-DLOCAL"           # added after the default flags
+# submit = "G++20"            # Codeforces language: a name (or part of one) or an id; default: the newest
 # template = "~/cp/template.cpp"
-# build = "g++ -std=c++20 {src} -o {exe}"   # 完全自定义：替换内置的编译命令
+# build = "g++ -std=c++20 {src} -o {exe}"   # full control: replaces the built-in build command
 # run = "{exe}"
 ```
 
-- **占位符**：编译和运行命令用 `{src}`、`{exe}`、`{dir}`、`{name}`；起始代码用 `{{handle}}`、`{{date}}`、`{{time}}`、`{{problem}}`、`{{name}}`、`{{url}}`。旧的 `$%U%$` 等照样替换。
-- **未内置的语言**：写一节 `[hs]`，给出 `build` / `run` / `submit` 即可。
+- **Placeholders**: build and run commands get `{src}`, `{exe}`, `{dir}`, `{name}`; starter
+  code gets `{{handle}}`, `{{date}}`, `{{time}}`, `{{problem}}`, `{{name}}`, `{{url}}`. The old
+  `$%U%$` style is still replaced.
+- **Languages cf-tool doesn't know**: a table like `[hs]` with `build`, `run` and `submit`.
 
-### 语言（languages.py，由 presets.py 和 langs.py 合并而来）
+### Languages (languages.py, from presets.py + langs.py)
 
-- **内置**：C++、C、Python、Java、Kotlin、Rust、Go。
-- **工具链探测**：沿用现在的做法（macOS 的 `/usr/bin` 占位程序、GCC 优先、按版本信息去重），结果按 PATH 缓存在 `STATE_DIR`。
-- **C++ 编译参数**：
-  - `-std` 取自提交语言（G++17 / 20 / 23 对应 c++17 / 20 / 23，老编译器用 `c++2b`）；
-  - 栈开到 256 MB：macOS 用链接参数，Linux 用子进程的 `RLIMIT_STACK`，MinGW 用 `--stack`；
-  - clang 的 bits/stdc++.h 在编译时临时加 `-I`，不写进配置。
-- **Python**：提交 PyPy 时，本机有 pypy3 就用它跑。
-- **提交语言**：先看配置的 `submit`；否则从 CF 实时列表里选本语言最新、最合适的一个（列表缓存 1 天，没有就用内置表）。
+- **Built in**: C++, C, Python, Java, Kotlin, Rust, Go.
+- **Toolchain detection**: as now (macOS `/usr/bin` placeholder programs, GCC first, dedupe
+  by version banner); results cached in `STATE_DIR` per PATH.
+- **C++ flags**:
+  - `-std` from the submit language (G++17/20/23 → c++17/20/23; `c++2b` on old compilers);
+  - a 256 MB stack: a linker flag on macOS, the child's `RLIMIT_STACK` on Linux, `--stack`
+    on MinGW;
+  - clang's bits/stdc++.h added with `-I` at build time, never written into the settings.
+- **Python**: when submitting as PyPy and pypy3 is installed, tests run with it.
+- **Submit language**: the configured `submit`; otherwise the newest fitting one of the
+  family from Codeforces' live list (cached for a day; the built-in table without it).
 
-### 构建与运行（build.py）
+### Build and run (build.py)
 
-- **缓存**：放在 `$XDG_CACHE_HOME/cf/build/<key>/`，key 是源码、编译命令和编译器版本的哈希；源码里有 `#include "…"` 时每次重编；超过 7 天的缓存自动清掉。
-- **路径**：`{src}` 用真实路径（修正 `../a.cpp`、`tools/gen.py` 跑错文件的 bug）。
-- **运行**：
-  - 用独立进程组，超时就杀掉整棵进程树，杀掉后不再无限期等待输出；
-  - 输出设上限，超过判 OLE；
-  - 统计 CPU 时间和整棵进程树的峰值内存。
+- **Cache**: `$XDG_CACHE_HOME/cf/build/<key>/`, keyed by a hash of the source, the build
+  command and the compiler's banner; a source with `#include "…"` is rebuilt every time;
+  entries older than 7 days are pruned.
+- **Paths**: `{src}` is the real path (fixes `../a.cpp` and `tools/gen.py` running the
+  wrong file).
+- **Running**:
+  - its own process group; on a timeout the whole tree is killed, and nothing waits
+    forever on its output afterwards;
+  - output is capped; past the cap it is "Output limit exceeded";
+  - CPU time, and the peak memory of the whole process tree.
 
-### 测试（judge.py）
+### Testing (judge.py)
 
-- **比较**：默认按 token 比较；题面写了误差或允许任意大小写时，自动放宽。
-  - 大小写的识别要收紧，不能把 “In any case, …” 这种说法当成“任意大小写”。
-  - `--strict` 逐行比较（0.3 的行为），`-e` / `-i` 手动放宽，`--checker CMD` 按 testlib 的参数顺序调用。
-- **输出**：每个测试一行 ✓/✗、时间、内存，超限的标出来；失败时左右对照，多组样例只显示出错的那一组。
-- **记录结果**：按源码哈希记下测试结果，`cf submit` 发现这份代码的样例没过时会先问一句。
-- **`--watch`**：保存代码或测试后自动重新编译、重跑，Ctrl-C 退出。
-- **`--add` / `--accept`**：保留。新加的测试按编号接着排，对拍失败的存成 `tests/stress-<seed>`。
-- **交互题**：`cf test --interactor X`，题目目录里有 `interactor.*` 时自动使用。
-  - 交互器按 testlib 约定以 `interactor <input> <output>` 运行，标准输入输出和你的程序对接；
-  - 结果看交互器的退出码：0 通过，1 WA，2 PE，3 FAIL；
-  - 没有交互器时，像现在一样提示不能评测。
+- **Comparison**: tokens by default; widened automatically when the statement allows an
+  error or any letter case.
+  - Letter-case detection gets stricter: "In any case, …" must not count.
+  - `--strict` compares trimmed lines (0.3's behavior), `-e`/`-i` widen by hand,
+    `--checker CMD` runs a checker with testlib's argument order.
+- **Output**: one ✓/✗ line per test with time and memory, limits flagged; a failure shows
+  output and answer side by side, only the failing case of a multi-test sample.
+- **Results are recorded** by source hash; `cf submit` asks first when this exact code
+  failed its tests.
+- **`--watch`**: rebuild and re-run when the code or a test is saved; Ctrl-C ends it.
+- **`--add` / `--accept`** stay. New tests get the next number; a stress failure is saved as
+  `tests/stress-<seed>`.
+- **Interactive problems**: `cf test --interactor X`, used automatically when the folder has
+  `interactor.*`.
+  - The interactor runs as `interactor <input> <output>` (testlib's convention), its stdin
+    and stdout wired to the solution;
+  - its exit code is the verdict: 0 accepted, 1 wrong answer, 2 presentation error, 3 fail;
+  - without an interactor, the problem isn't judged (as now).
 
-### Codeforces 这一侧（cf_tool/codeforces/）
+### The Codeforces side (cf_tool/codeforces/)
 
-- **保留**：三级登录、Cloudflare 处理、完整 cookie 记录、页面解析、提交、listen、contests、pick、CP Editor 兼容。这些都实测过。
-- **会话**：会话文件不变，升级后不用重新登录。
-- **获取**：`cf get <比赛>` 一次请求 `/contest/<id>/problems` 拿到所有题（已验证现有解析器能处理这个页面），拿不到时退回逐题请求。
+- **Kept**: the three login tiers, the Cloudflare handling, full cookie records, page
+  parsing, submitting, listen, contests, pick, CP Editor compatibility — all tested live.
+- **Session**: same file and format, so an upgrade doesn't log anybody out.
+- **Fetching**: `cf get <contest>` reads `/contest/<id>/problems` once for every problem (the
+  current parsers handle that page); per problem only when that fails.
 
-review 发现的问题，在这一阶段修复：
+Problems the review found, fixed in phase 2:
 
-1. **服务器出错被当成掉线**：5xx 和 429 页面当作正文处理，被误认为登录失效，于是清掉 cookie 重登，最后弹出浏览器窗口。改为当作网络错误，退避后重试。
-2. **提交可能被重发**：提交的 POST 超时后会自动重发。改为绝不重发；结果不明时去 `/my` 查有没有新提交。
-3. **并发请求写回旧 cookie**：并发请求结束时，会把旧 cookie 写回 jar。请求和 jar 的修改之间要加锁。
-4. **过 Cloudflare 时可能顶掉登录态**：浏览器导出的匿名 JSESSIONID 可能顶掉已登录的会话。过检查时只采用 Cloudflare 的 cookie 和 UA，需要实测确认。
-5. **listen 的安全性**：
-   - 加 socket 超时，只收 JSON，拒绝网页（http/https Origin）发来的请求；
-   - 不是题目的 URL 直接拒绝，不再覆盖当前目录的样例。
-6. **其他小问题**：
-   - Rich 会把 `:x:` 变成 emoji，改用 `Console(emoji=False)`；
-   - clone 遇到 Ctrl-C 要及时停下，500 秒的等待要能打断；
-   - 浏览器重启失败时，第一个 Chrome 没有退出。
+1. **A server error looks like a lapsed login**: 5xx/429 pages count as content, then as
+   logged out: cookies are wiped, the login retried, and a browser window opens. They become
+   transport errors, retried with backoff.
+2. **A submission can be sent twice**: the POST is resent after a timeout. It is never
+   resent; when the outcome is unknown, `/my` is checked for the new submission.
+3. **Concurrent requests write stale cookies back**: requests and cookie-jar edits get a
+   lock.
+4. **Passing a check can replace the logged-in session**: the browser exports an anonymous
+   JSESSIONID. A solve adopts only Cloudflare's cookies and the UA (to confirm live).
+5. **listen**: a socket timeout, JSON only, requests from web pages (http/https Origin)
+   rejected; a URL that isn't a problem is rejected instead of overwriting the current
+   folder's samples.
+6. **Smaller**: Rich turns `:x:` into an emoji (`Console(emoji=False)`); Ctrl-C must stop
+   clone promptly, and its 500 s wait must be interruptible; when the browser relaunch fails,
+   the first Chrome is left running.
 
-### 命令
+### Commands
 
-| 命令 | 作用 |
+| Command | What it does |
 | --- | --- |
-| `cf get <比赛\|题目\|URL> [-l 语言]` | 建目录、下样例、写起始代码（取代 parse + gen） |
-| `cf race <比赛>` | 倒计时，开赛后执行 get 并打开题面 |
-| `cf test [题\|文件] [测试…]` | 跑样例：`-w` / `--add` / `--accept` / `-e` / `-i` / `--strict` / `--checker` / `--interactor` |
-| `cf stress [gen] [brute] [solution]` | 对拍：`-n` / `--seed` |
-| `cf submit [题] [文件] [-l 语言]` | 提交并实时显示评测 |
-| `cf status [题] [--all]` | 你的提交，实时刷新（取代 watch） |
-| `cf open [题\|比赛] [--standings\|--last]` | 在浏览器里打开（取代 stand / sid） |
-| `cf problems [比赛]` | 比赛的题目和通过人数（取代 list） |
-| `cf new [名字]` | 用模板新建代码文件（取代 gen） |
-| `cf login` / `cf logout` | 登录、退出 |
-| `cf langs [--all]` | 每种语言用哪个编译器、提交成什么、起始代码在哪 |
-| `cf config` | 用编辑器打开 config.toml，改完检查一遍 |
-| `cf contests` / `pick` / `listen` / `pull` / `clone` / `doctor` / `upgrade` / `completion` | 保留 |
+| `cf get <contest\|problem\|URL> [-l LANG]` | folders, samples, starter code (replaces parse + gen) |
+| `cf race <contest>` | countdown; at the start, get + open the problems |
+| `cf test [problem\|file] [test…]` | run the tests: `-w`, `--add`, `--accept`, `-e`, `-i`, `--strict`, `--checker`, `--interactor` |
+| `cf stress [gen] [brute] [solution]` | stress test: `-n`, `--seed` |
+| `cf submit [problem] [file] [-l LANG]` | submit, then the verdict live |
+| `cf status [problem] [--all]` | your submissions, refreshed live (replaces watch) |
+| `cf open [problem\|contest] [--standings\|--last]` | open in the browser (replaces stand, sid) |
+| `cf problems [contest]` | a contest's problems and solve counts (replaces list) |
+| `cf new [name]` | a code file from your template (replaces gen) |
+| `cf login` / `cf logout` | log in, log out |
+| `cf langs [--all]` | per language: the compiler, what it submits as, the starter file |
+| `cf config` | open config.toml in the editor, check it afterwards |
+| `cf contests` / `pick` / `listen` / `pull` / `clone` / `doctor` / `upgrade` / `completion` | kept |
 
-- 隐藏别名：parse→get、gen→new、watch→status、list→problems、stand→open --standings、sid→open --last。
-- CP Editor 约定不变：`cf --version` 输出 `cf-tool v0.4.0`；`cf submit <cid> <idx> <file>`；不是终端时输出 `status: …` 行。
+- Hidden aliases: parse→get, gen→new, watch→status, list→problems,
+  stand→open --standings, sid→open --last.
+- The CP Editor contract stays: `cf --version` prints `cf-tool v0.4.0`;
+  `cf submit <cid> <idx> <file>`; `status: …` lines when not on a terminal.
 
-### 迁移
+### Migration
 
-- **配置**：0.3 的 JSON 配置在第一次运行时自动转成 config.toml，`~/.cf/config` 的结构相同，一并支持。
-  - 带过去：默认语言、各语言的起始代码路径、提交语言 id、host、proxy。
-  - 不带过去：编译脚本，改为自动生成。转换时列出丢掉了什么；旧文件原样保留。
-- **起始代码**：模板文件不用改，旧占位符照样替换。
-- **Go 版**：不再导入 `~/.cf/session`（Go 版早已无法登录）。
+- **Settings**: 0.3's JSON config becomes config.toml on the first run; `~/.cf/config` has
+  the same schema and is handled too.
+  - Carried over: the default language, each language's starter file, the submit language
+    id, host, proxy.
+  - Not carried over: build scripts (generated now). The conversion lists what was dropped;
+    the old file stays as it is.
+- **Starter files**: unchanged; the old placeholders are still replaced.
+- **Go tool**: `~/.cf/session` is no longer imported (the Go tool can't log in anyway).
 
-## 4. 代码结构
+## 4. Code layout
 
 ```
 cf_tool/
-  cli/            按命令分组：__init__（分组、别名、报错）、problems、testing、submitting、account、setup、misc
-  settings.py     config.toml、默认值、校验、迁移
-  languages.py    语言表、工具链探测、-std、CF 语言选择、起始代码
-  workspace.py    题目和比赛目录、元数据、测试文件、目标解析、候选文件（取代 args / codefiles / problem / templates）
-  build.py        缓存编译、进程运行（进程组、输出上限、时间、内存）
-  judge.py        比较、单个测试、test 流程、watch、交互器
+  cli/            commands by group: __init__ (group, aliases, errors), problems, testing,
+                  submitting, account, setup, misc
+  settings.py     config.toml, defaults, validation, migration
+  languages.py    the language table, toolchain detection, -std, the Codeforces language,
+                  starter code
+  workspace.py    problem and contest folders, metadata, test files, targets, candidate
+                  files (replaces args, codefiles, problem, templates)
+  build.py        cached builds, running processes (process group, output cap, time, memory)
+  judge.py        comparison, one test, the test flow, watch, interactor
   stress.py  listen.py  views.py  ui.py  errors.py
   codeforces/     client gateway http browser pages session crypto
 ```
 
-另外：
+Also:
 
-- 去掉“Port of cmd/xxx.go”和 Go 兼容分支（Go cookie jar 和旧会话格式的读取、`folder_name`、根目录查找）。
-- 测试按模块重写，新增全场题面页面的 fixture。
-- CLAUDE.md、README、CHANGELOG 重写。
+- Remove the "Port of cmd/xxx.go" notes and the Go compatibility branches (the Go cookie jar
+  and old session formats, `folder_name`, the root-folder search).
+- Tests rewritten per module; a fixture for the all-problems page.
+- CLAUDE.md, README and CHANGELOG rewritten.
 
-## 5. 阶段（每阶段测试全绿、black 和 flake8 干净后在 v0.4 分支提交，不推送）
+## 5. Phases (each: tests green, black and flake8 clean, then a commit on v0.4; no push)
 
-0. **准备**（已完成）：建 v0.4 分支；修好 dev venv（把旧的 0.2.0 安装换成 editable 安装）；加 tomlkit 依赖；写本计划。
-1. **核心模型**：settings（含迁移）、languages、workspace、build，各自配测试。
-2. **命令迁到新核心**：
-   - 依次切换：get、race、listen、new、pick；test（含 watch、交互器）、stress；submit、status、login、logout；open、problems、pull、clone、contests。
-   - 修复上面列出的网络层问题，删掉旧模块。
-3. **体验**：
-   - langs、config、doctor、completion；
-   - 首次运行问语言、就地登录、提交前提醒；
-   - 统一输出风格和报错文案。
-4. **文档和发布准备**：
-   - README、CHANGELOG、CLAUDE.md，版本号改为 0.4.0；
-   - CI 增加 PyPI 发布 workflow（trusted publishing）。
-5. **验收**（需要 Fau 在场）：
-   - 全部测试，toolchain 测试（CI 上的 Linux 和 macOS），live 测试；
-   - 用你的终端在练习题上真实登录、提交一次；
-   - 然后由你决定合并、tag、Release、PyPI。
+0. **Prep** (done): the v0.4 branch; the dev venv fixed (the stale 0.2.0 install replaced by
+   an editable one); the tomlkit dependency; this plan.
+1. **Core model**: settings (with migration), languages, workspace, build, each with tests.
+2. **Commands onto the new core**:
+   - in order: get, race, listen, new, pick; test (with watch and the interactor), stress;
+     submit, status, login, logout; open, problems, pull, clone, contests;
+   - the network fixes above; the old modules deleted.
+3. **UX**:
+   - langs, config, doctor, completion;
+   - the first-run language question, logging in on the spot, the warning before submitting
+     failed code;
+   - one output style and clear error messages.
+4. **Docs and release prep**:
+   - **README rewritten as a whole** (Fau's request): from scratch for the new version, so a
+     new user understands it at first read; everything old or useless deleted (the Go port,
+     templates and scripts, placeholders, old command names, the old layout). Outline:
+     1. one sentence and an example;
+     2. install;
+     3. three steps (get, test, submit);
+     4. the commands;
+     5. testing: comparison, your own tests, --watch, stress, interactive problems;
+     6. settings: config.toml, all optional;
+     7. logging in;
+     8. Competitive Companion, CP Editor, Tab completion;
+     9. upgrading from 0.3;
+     10. troubleshooting;
+     11. development (last, short).
+   - CHANGELOG, CLAUDE.md, version 0.4.0;
+   - a PyPI publishing workflow (trusted publishing) in CI;
+   - **independent review** (Fau's request): once code and docs are written, a fresh agent
+     that took no part in the rewrite reviews all of `main..v0.4`.
+     - Scope: correctness bugs, security, the CP Editor contract, the 0.3 migration, Windows
+       paths, agreement with this plan, missing tests, README against actual behavior;
+     - it gets the code, not my conclusions;
+     - I verify each finding, fix the real ones, get the tests green again and commit; the
+       report says what was fixed and what didn't hold up.
+5. **Acceptance** (needs Fau):
+   - all tests, the toolchain tests (CI on Linux and macOS), the live tests;
+   - a real login and submission on a practice problem from Fau's terminal;
+   - then Fau decides on merging, the tag, the release and PyPI.
 
-## 6. 无人值守时的规则
+## 6. Rules while unattended
 
-- 只在 v0.4 分支上提交，不 push，不打 tag，不发布。
-- 不登录，不提交；网络只访问公开页面，用于 live 测试。
-- 1Password 锁定时无法签名，所以无人值守期间的提交不签名。Fau 回来后再统一补签，或合并成几个签名提交，然后才合进 main。
+- Commit on v0.4 only; no push, tag or release.
+- No logging in, no submitting; the network only for public pages (live tests).
+- 1Password can't sign while locked, so unattended commits are unsigned (`--no-gpg-sign`);
+  they get re-signed (or squashed into a few signed commits) with Fau before merging into
+  main.
