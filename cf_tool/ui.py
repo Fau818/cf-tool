@@ -36,6 +36,13 @@ def _width() -> int | None:
     return None if any(s is not None and s.isatty() for s in streams) else WIDE
 
 
+# NOTE: on Windows, output to a pipe (CP Editor) or a file is in the locale's code
+# \     page, which has no ✓ or →: UTF-8 instead of a crash
+for _stream in (sys.stdout, sys.stderr):
+    if (getattr(_stream, "encoding", None) or "utf-8").lower().replace("-", "") != "utf8":
+        with contextlib.suppress(AttributeError, ValueError):
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
 console = Console(highlight=False, emoji=False, width=_width())  # NOTE: ":x:" in a sample is text
 
 # The palette: soft colors that read well on dark and light terminals. Plain

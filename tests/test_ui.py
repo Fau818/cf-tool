@@ -1,5 +1,8 @@
 """ui.select: headings between groups, in the menu and in the typed fallback."""
 
+import os
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -165,3 +168,11 @@ def test_rows_line_up(monkeypatch, capsys):
         "  1) Compiler       GCC 14  (recommended)",
         "  2) Starter code   built-in",
     ]
+
+
+def test_marks_survive_an_output_without_them():
+    # NOTE: Windows writes to a pipe in its code page (cp1252 has no ✓)
+    code = "from cf_tool import ui; ui.success('done')"
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env)
+    assert done.returncode == 0 and "✓ done".encode() in done.stdout, done.stderr
