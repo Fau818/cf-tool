@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.0 (2026-11)
+
+A new cf-tool: it no longer follows the Go cf-tool's model, and needs no setup.
+
+- **No templates, no scripts.** The file extension picks the language, and cf finds the
+  compiler (GCC first) when it needs one. Settings are optional, in a commented
+  `~/.config/cf/config.toml` that `cf config` opens: the compiler, extra flags, the
+  Codeforces language, your starter file, or whole build and run commands.
+- **Local matches the judge.** C++ is compiled with the standard of the language it is
+  submitted as (G++20 → `-std=c++20`), with Codeforces' 256 MB stack. Outputs are compared
+  word by word, like Codeforces' usual checker; the statement's error and letter-case rules
+  apply on their own.
+- **`cf get`** replaces `parse` and `gen`: one folder per problem (`2050/a/`) with its
+  tests in `tests/` and your starter code, and a whole contest in a single request.
+  A problem folder knows its problem (`.cf-problem.json`), so commands work anywhere
+  inside it, and `cf test b` works from the contest's folder.
+- **`cf test`** keeps builds in a cache (an unchanged file isn't compiled again), and
+  outside your folders; `-w` tests again on every save; interactive problems run against
+  an interactor; `checker.*` in the problem's folder judges by itself. A time limit
+  stops everything the program started, and output past 64 MB stops it.
+- **`cf submit`** logs in on the spot when needed, asks before sending code that failed
+  its tests, and sends the form only once: if the answer is lost, it looks for the
+  submission instead of sending it again.
+- **`cf stress`** finds `gen.*` and `brute.*` in the problem's folder.
+- **New commands**: `login`, `logout`, `langs`, `new`, `problems`, `status`, `open -s`,
+  `open --last`. The 0.3 names (`parse`, `gen`, `watch`, `list`, `stand`, `sid`) still
+  work.
+- **Fixes**: a server error (5xx, 429) no longer looks like a lapsed login (which logged
+  in again and could open a browser window); passing a Cloudflare check while logged in no
+  longer risks the session; requests no longer write stale cookies back; `cf listen` takes
+  problems only from the extension, with a timeout; `:x:` in a sample stays text.
+- **From 0.3**: the settings move to `config.toml` on the first run (starter files,
+  languages, host, proxy); old problem folders still work; the login carries over. The Go
+  tool's `~/.cf/session` is no longer imported.
+
 ## 0.3.1 (2026-10)
 
 - **Language presets and a setup wizard**: `cf config` asks which language (C++,

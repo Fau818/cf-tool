@@ -1,0 +1,30 @@
+name: Release
+
+# Publishes cf-tool to PyPI when a version tag (v0.4.0) is pushed. PyPI trusts
+# this workflow (trusted publishing), so no token is stored anywhere. One-time
+# setup on pypi.org: a (pending) publisher for owner Fau818, repository cf-tool,
+# workflow release.yml, environment pypi.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      id-token: write # NOTE: what trusted publishing signs in with
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      # NOTE: setup-uv has published no moving major tags (v10) since v8: pin a release
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: The tag names the package's version
+        run: |
+          version=$(uv run --no-project python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          test "v$version" = "$GITHUB_REF_NAME"
+      - run: uv sync --locked --extra dev
+      - run: uv run --locked pytest -q
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
