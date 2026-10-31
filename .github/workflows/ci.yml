@@ -42,5 +42,11 @@ jobs:
       - run: uv sync --locked --extra dev
       - run: uv run --locked pytest -q
       # every language preset's starter, built and run with the runner's compilers
+      # NOTE: macOS runners come without Go; Ubuntu's have every preset's compiler
+      - if: matrix.python == '3.13' && matrix.os == 'macos-latest'
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false # NOTE: no go.sum to key a cache on
       - if: matrix.python == '3.13' && matrix.os != 'windows-latest'
         run: uv run --locked pytest -q -rs -m toolchain
