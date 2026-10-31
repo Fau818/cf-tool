@@ -114,6 +114,11 @@ eval "$(cf completion bash)"    # in ~/.bashrc (bash 4.4+)
 cf completion fish | source     # in ~/.config/fish/config.fish
 ```
 
+If `cf <Tab>` offers `app`, `apps`, `push`…, that is the completion for Cloud Foundry's
+`cf`, which the zsh-completions plugin ships. Load ours after it (the `eval` above,
+after compinit), or save ours as a `_cf` earlier in `$fpath`:
+`cf completion zsh > ~/.zfunc/_cf` with `fpath=(~/.zfunc $fpath)` before compinit.
+
 ### Which file `cf submit` sends
 
 The code files (by template suffix) in the current directory are the candidates, and
