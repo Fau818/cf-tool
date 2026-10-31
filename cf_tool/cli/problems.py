@@ -23,7 +23,7 @@ from cf_tool.cli.common import (
     target_of,
     write_starter,
 )
-from cf_tool.cli.completion import complete_languages, complete_problems
+from cf_tool.cli.completion import complete_contests, complete_languages, complete_problems
 from cf_tool.errors import CFError
 from cf_tool.workspace import Target
 
@@ -87,7 +87,7 @@ def set_up(target: Target, key: str, tries: int = 1) -> Path:
 
 
 @click.command()
-@click.argument("specs", nargs=-1, metavar="CONTEST|PROBLEM|URL", shell_complete=complete_problems)
+@click.argument("specs", nargs=-1, metavar="CONTEST|PROBLEM|URL", shell_complete=complete_contests)
 @click.option(
     "-l",
     "--lang",
@@ -113,7 +113,7 @@ def get(specs: tuple[str, ...], language: str | None) -> None:
 
 
 @click.command()
-@click.argument("specs", nargs=-1, metavar="CONTEST", shell_complete=complete_problems)
+@click.argument("specs", nargs=-1, metavar="CONTEST", shell_complete=complete_contests)
 @click.option(
     "-l",
     "--lang",

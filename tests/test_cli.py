@@ -895,12 +895,20 @@ def test_upgrade(monkeypatch):
 # └──────────────────────────────────────────────────────────┘
 
 
-def _completions(args: list[str], incomplete: str) -> list[str]:
+def _items(args: list[str], incomplete: str):
     """What Tab offers after `cf <args> <incomplete>`."""
     from click.shell_completion import ShellComplete
 
-    items = ShellComplete(main, {}, "cf", "_CF_COMPLETE").get_completions(args, incomplete)
-    return [item.value for item in items]
+    return ShellComplete(main, {}, "cf", "_CF_COMPLETE").get_completions(args, incomplete)
+
+
+def _completions(args: list[str], incomplete: str) -> list[str]:
+    return [item.value for item in _items(args, incomplete)]
+
+
+def _helps(args: list[str], incomplete: str) -> list[str]:
+    """What zsh and fish show beside each completion."""
+    return [item.help for item in _items(args, incomplete)]
 
 
 def test_complete_commands():
@@ -909,12 +917,37 @@ def test_complete_commands():
 
 def test_complete_problems_and_tests(contest, monkeypatch):
     monkeypatch.chdir(contest["work"] / "2050")
-    assert _completions(["test"], "") == ["a", "b", ""]  # NOTE: and file names
+    assert _completions(["test"], "") == ["a", "b", "2050"]
     monkeypatch.chdir(contest["work"] / "2050" / "a")
-    assert _completions(["test"], "") == ["1", "2", "a", "b", "2050A", ""]
+    assert _completions(["test"], "") == ["1", "2", "a", "b", "2050", "2050A", "a.py"]
     (contest["work"] / "546D.py").write_text("")
     monkeypatch.chdir(contest["work"])
     assert _completions(["get"], "5") == ["546D"]
+
+
+def test_complete_contests_around_not_every_number(contest, monkeypatch):
+    (contest["work"] / "546D.py").write_text("")
+    (contest["work"] / "notes.txt").write_text("")
+    monkeypatch.chdir(contest["work"])
+    assert _completions(["submit"], "") == ["2050", "546D", "546D.py"]  # NOTE: no notes.txt
+    assert _completions(["submit"], "2050") == ["2050", "2050a", "2050b"]
+    assert _completions(["submit", "2050"], "") == ["a", "b", "546D.py"]  # NOTE: its problems
+    assert _helps(["submit", "2050"], "")[:2] == ["A. Test", "B. Test"]
+    assert [item.type for item in _items(["submit"], "../")] == ["file"]  # NOTE: a path
+
+
+def test_complete_contests_on_now_for_cf_get(home, monkeypatch):
+    now = int(time.time())
+    listed = [
+        {"id": 2282, "name": "Upcoming", "phase": "BEFORE", "startTimeSeconds": now + 3600},
+        {"id": 2290, "name": "Next month", "phase": "BEFORE", "startTimeSeconds": now + 9**7},
+        {"id": 2281, "name": "Running", "phase": "CODING", "startTimeSeconds": now - 600},
+        {"id": 2275, "name": "Over", "phase": "FINISHED", "startTimeSeconds": now - 9**5},
+    ]
+    paths.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    (paths.STATE_DIR / "contests.json").write_text(json.dumps({"result": listed}))
+    assert _completions(["get"], "") == ["2282", "2281", "2275"]
+    assert _helps(["get"], "228") == ["Upcoming", "Running"]
 
 
 def test_completion_script_is_only_the_script(home):
