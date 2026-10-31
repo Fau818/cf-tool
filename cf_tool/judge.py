@@ -1,11 +1,12 @@
 """Local testing (`cf test`): run before_script / script / after_script,
 feed in{i}.txt, compare with ans{i}.txt. Port of cmd/test.go.
 
-As in the original: no time limit (interrupt a hung solution with Ctrl+C),
-outputs are compared after trimming each line, the time shown is the
-program's user CPU time (wall time where the OS can't report it), and
-scripts are split into words by the Go tool's own rules, so a config shared
-with the Go tool runs identically.
+As in the original: outputs are compared after trimming each line, the time
+shown is the program's user CPU time (wall time where the OS can't report
+it), and scripts are split into words by the Go tool's own rules, so a
+config shared with the Go tool runs identically. Unlike it, a sample that
+runs a few times past the problem's time limit is killed (the limit comes
+from `cf parse`, see problem.py).
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import psutil
 from cf_tool import codefiles, templates, ui, views
 from cf_tool.config import NO_TEMPLATE, Config
 from cf_tool.errors import CFError
+from cf_tool.problem import ProblemInfo
 
 try:
     import resource
@@ -126,13 +128,33 @@ def run_script(script: str, cwd: Path) -> None:
         raise CFError(_exit_reason(process.returncode))
 
 
-def judge(sample_id: str, command: str, cwd: Path) -> bool:
-    """Run one sample; print Passed/Failed (plus a diff). Returns pass/fail."""
+DEFAULT_TIMEOUT = 10.0  # seconds a sample may run when its time limit is unknown
+
+
+def timeout_for(time_limit: float | None) -> float:
+    """Seconds a sample may run before it is killed: a few times the limit."""
+    if time_limit is None:
+        return DEFAULT_TIMEOUT
+    return max(
+        3 * time_limit, time_limit + 2
+    )  # NOTE: a slower machine than the judge's still passes
+
+
+def judge(sample_id: str, command: str, cwd: Path, problem: ProblemInfo | None = None) -> bool:
+    """Run one sample and print its verdict; returns whether it passed.
+    - output as the answer: Passed, with time and memory (flagged over a limit)
+    - running past its timeout: killed, Time limit exceeded
+    - an exit status other than 0: Runtime Error, with what it printed
+    - other output: Failed, with a diff"""
     in_path = cwd / f"in{sample_id}.txt"
     ans_path = cwd / f"ans{sample_id}.txt"
+    time_limit = problem.time_limit if problem else None
+    memory_limit = problem.memory_limit if problem else None
+    timeout = timeout_for(time_limit)
 
     peak = [0]
     stop = threading.Event()
+    killed = False
     cpu_start = _children_cpu() if resource else 0.0
     wall_start = time.perf_counter()
     with in_path.open("rb") as stdin:
@@ -140,7 +162,11 @@ def judge(sample_id: str, command: str, cwd: Path) -> bool:
         watcher = threading.Thread(target=_watch_memory, args=(process.pid, peak, stop))
         watcher.start()
         try:
+            raw_out, _ = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
             raw_out, _ = process.communicate()
+            killed = True
         except BaseException:
             process.kill()
             process.wait()
@@ -153,8 +179,17 @@ def judge(sample_id: str, command: str, cwd: Path) -> bool:
     else:
         elapsed = time.perf_counter() - wall_start
 
+    if killed:
+        ui.line(
+            (f"Time limit exceeded #{sample_id}", "red"), (f" ... killed after {timeout:g}s", "")
+        )
+        return False
     if process.returncode != 0:
-        raise CFError(f"Runtime Error #{sample_id} ... {_exit_reason(process.returncode)}")
+        ui.red(f"Runtime Error #{sample_id} ... {_exit_reason(process.returncode)}")
+        output = raw_out.decode(errors="replace")
+        if output.strip():
+            ui.console.print(views.program_output(output))
+        return False
 
     try:
         ans = plain(ans_path.read_text(encoding="utf-8", errors="replace"))
@@ -163,8 +198,20 @@ def judge(sample_id: str, command: str, cwd: Path) -> bool:
     out = plain(raw_out.decode(errors="replace"))
 
     passed = out == ans
-    verdict = (f"Passed #{sample_id}", "green") if passed else (f"Failed #{sample_id}", "red")
-    ui.line(verdict, (f" ... {elapsed:.3f}s {format_memory(peak[0])}", ""))
+    over_time = time_limit is not None and elapsed > time_limit
+    over_memory = memory_limit is not None and peak[0] > memory_limit * 1024 * 1024
+    parts = [
+        (f"Passed #{sample_id}", "green") if passed else (f"Failed #{sample_id}", "red"),
+        (" ... ", ""),
+        (f"{elapsed:.3f}s", "yellow" if over_time else ""),
+        (" ", ""),
+        (format_memory(peak[0]), "yellow" if over_memory else ""),
+    ]
+    if over_time:
+        parts.append((f" (over the {time_limit:g}s limit)", "yellow"))
+    if over_memory:
+        parts.append((f" (over the {memory_limit} MB limit)", "yellow"))
+    ui.line(*parts)
     if not passed:
         sample_input = in_path.read_text(encoding="utf-8", errors="replace")
         ui.console.print(views.failed_sample(sample_input, out.splitlines(), ans.splitlines()))
@@ -181,6 +228,9 @@ def run_test(
     samples = get_sample_ids(cwd)
     if not samples:
         raise CFError("Cannot find any sample file")
+    info = ProblemInfo.load(cwd)
+    if info is not None and info.interactive:
+        raise CFError("This problem is interactive: its samples are a conversation, not an answer")
     # only files in cwd: the scripts run there, with $%full%$ relative to it
     filename, index = codefiles.pick(
         file_arg, cfg.template, cwd, contest=contest, problem=problem, action="test"
@@ -195,7 +245,7 @@ def run_test(
     passed = 0
     for sample_id in samples:
         try:
-            passed += judge(sample_id, script, cwd)
+            passed += judge(sample_id, script, cwd, info)
         except CFError as e:
             ui.red(str(e))
     style = "bold green" if passed == len(samples) else "bold red"

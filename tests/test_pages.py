@@ -355,3 +355,40 @@ def test_is_captcha_error():
     assert is_captcha_error("Please confirm you are not a robot")
     assert is_captcha_error("Captcha verification failed")
     assert not is_captcha_error("Invalid handle/email or password")
+
+
+def test_problem_header():
+    from cf_tool.pages import ProblemHeader, find_problem_header
+
+    assert find_problem_header(fixture("problem_4a.html")) == ProblemHeader(
+        "A. Watermelon", 1.0, 64, False
+    )
+    interactive = find_problem_header(fixture("interactive_1520f1.html"))
+    assert interactive == ProblemHeader("F1. Guess the K-th Zero (Easy version)", 1.0, 256, True)
+    assert find_problem_header(fixture("acmsguru_100.html")) == ProblemHeader("", None, None, False)
+
+
+def test_sample_cases():
+    from cf_tool.pages import find_sample_cases
+
+    assert find_sample_cases(fixture("problem_2171a.html")) == [
+        ([0, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5])  # NOTE: line 0 gives the number of cases
+    ]
+    assert find_sample_cases(fixture("problem_4a.html")) == [None]  # classic markup
+
+
+def test_sample_cases_follow_the_trimmed_text():
+    from cf_tool.pages import find_sample_cases, find_samples
+
+    line = '<div class="test-example-line test-example-line-{}">{}</div>'
+    body = (
+        '<div class="input"><pre>'
+        + "".join(line.format(case, text) for case, text in [(1, ""), (1, "3"), (2, "4"), (2, " ")])
+        + '</pre></div><div class="output"><pre>'
+        + line.format(1, "x")
+        + line.format(2, "y")
+        + "</pre></div>"
+    )
+    inputs, _ = find_samples(body)
+    assert inputs == ["3\n4\n"]
+    assert find_sample_cases(body) == [([1, 2], [1, 2])]

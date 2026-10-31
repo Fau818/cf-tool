@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
+from typing import Callable
 
 from rich.live import Live
 from rich.text import Text
@@ -20,6 +21,7 @@ from cf_tool.args import ERROR_NEED_PROBLEM_ID, Info
 from cf_tool.config import SESSION_PATH, Config
 from cf_tool.errors import CFError
 from cf_tool.gateway import Gateway, host_domain
+from cf_tool.problem import ProblemInfo
 from cf_tool.session import INFO_KEYS, Session
 
 ERROR_SKIP = "Exists, skip"
@@ -33,6 +35,7 @@ class Client:
         self.cfg = cfg
         self.session = Session.load(session_path or SESSION_PATH, host_domain(cfg.host))
         self.gw = Gateway(cfg, self.session)
+        self._languages: tuple[dict[str, str], bool] | None = None
 
     @property
     def host(self) -> str:
@@ -48,21 +51,33 @@ class Client:
 
     def config_login(self, handle_or_email: str, password: str) -> None:
         """Store credentials (encrypted) and log in."""
+        self._languages = None  # NOTE: logged in, the live list becomes readable
         self.gw.set_credentials(handle_or_email, password)
         self.gw.login()
 
     # ---------------------------------------------------------------- parse
 
-    def parse_problem(self, url: str, path: Path) -> tuple[int, bool]:
-        """Download one problem's samples into path as in{i}.txt/ans{i}.txt;
-        returns (sample count, standard input/output?)."""
+    def parse_problem(self, url: str, path: Path) -> tuple[int, bool, ProblemInfo]:
+        """Download one problem's samples into path as in{i}.txt/ans{i}.txt,
+        and what cf test needs to know about it (problem.py); returns (sample
+        count, standard input/output?, that info)."""
         body = self.gw.get_authed(url)
-        inputs, outputs = pages.find_samples(body)
+        header = pages.find_problem_header(body)
+        info = ProblemInfo(
+            name=header.name,
+            url=url,
+            time_limit=header.time_limit,
+            memory_limit=header.memory_limit,
+            interactive=header.interactive,
+            cases=pages.find_sample_cases(body),
+        )
         path.mkdir(parents=True, exist_ok=True)
+        info.save(path)  # NOTE: before the samples, which may fail to parse
+        inputs, outputs = pages.find_samples(body)
         for i, (sample_in, sample_out) in enumerate(zip(inputs, outputs), start=1):
             (path / f"in{i}.txt").write_text(sample_in, encoding="utf-8", newline="")
             (path / f"ans{i}.txt").write_text(sample_out, encoding="utf-8", newline="")
-        return len(inputs), pages.is_standard_io(body)
+        return len(inputs), pages.is_standard_io(body), info
 
     def parse(self, info: Info) -> tuple[list[str], list[Path]]:
         """Parse one problem, or every problem of the contest concurrently;
@@ -83,7 +98,7 @@ class Client:
         def work(problem_id: str, path: Path) -> None:
             url = dataclasses.replace(info, problem_id=problem_id).problem_url(self.host)
             try:
-                samples, standard_io = self.parse_problem(url, path)
+                samples, standard_io, problem = self.parse_problem(url, path)
             except CFError as e:
                 ui.red(f"Failed {problem_id}. Error: {e}")
                 return
@@ -91,6 +106,8 @@ class Client:
             parts = [(f"Parsed {problem_id} with {samples} {noun}.", "green")]
             if not standard_io:
                 parts.append((" Non standard input output format.", "yellow"))
+            if problem.interactive:
+                parts.append((" Interactive: cf test can't judge it.", "yellow"))
             ui.line(*parts)
 
         with ThreadPoolExecutor(max_workers=min(PARSE_THREADS, len(problem_ids))) as pool:
@@ -130,8 +147,17 @@ class Client:
 
     # --------------------------------------------------------------- submit
 
-    def submit(self, info: Info, lang_id: str, source: str, filename: str = "") -> None:
-        """Submit source, then watch its verdict; filename is only shown."""
+    def submit(
+        self,
+        info: Info,
+        lang_id: str,
+        source: str,
+        filename: str = "",
+        replace_language: Callable[[str, dict[str, str]], str] | None = None,
+    ) -> None:
+        """Submit source, then watch its verdict; filename is only shown.
+        When the submit form doesn't offer lang_id, replace_language(lang_id,
+        offered) names the one to use instead; without it that's an error."""
         if filename:
             ui.line(("Submit ", "cyan"), (filename, "bold green"), (f" to {info.hint()}", "cyan"))
         else:
@@ -142,6 +168,13 @@ class Client:
         body = self.gw.get_authed(url)
         handle = pages.require_handle(body)
         ui.plain(f"Current user: {handle}")
+        offered = pages.parse_languages(body)
+        if offered and lang_id not in offered:
+            if replace_language is None:
+                raise CFError(f"The submit form doesn't offer language {lang_id}")
+            lang_id = replace_language(lang_id, offered)
+        if offered:
+            ui.plain(f"Language: {offered.get(lang_id, lang_id)}")
         csrf = pages.find_csrf(body)
         ftaa, bfaa = self.gw.form_tokens()
         body = self.gw.post(
@@ -338,12 +371,12 @@ class Client:
 
     def languages(self) -> tuple[dict[str, str], bool]:
         """(id -> name, is_live): the submit form's list when logged in, else
-        the built-in table. Never opens a browser just for this list."""
-        try:
-            body = self.gw.get(f"{self.host}/problemset/submit", browser_fallback=False)
-        except CFError:
-            return langs.LANGS, False
-        live = pages.parse_languages(body)
-        if live:
-            return live, True
-        return langs.LANGS, False
+        the built-in table; read once per run. Never opens a browser for it."""
+        if self._languages is None:
+            try:
+                body = self.gw.get(f"{self.host}/problemset/submit", browser_fallback=False)
+                live = pages.parse_languages(body)
+            except CFError:
+                live = {}
+            self._languages = (live, True) if live else (langs.LANGS, False)
+        return self._languages

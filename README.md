@@ -24,8 +24,10 @@ today's Cloudflare-protected Codeforces, logging in from the terminal.
   (`546D.cpp`, `546/D/solution.cpp`, the `cf gen` file in `cf/contest/546/d/`), newest
   first with their edit times, and asks again before sending a file named for a
   different problem.
-- **Local testing** with your own compile/run scripts (no hardcoded compilers): per
-  sample CPU time and memory; a failed sample shows its output next to the answer.
+- **Setup in a few questions.** Pick a language; cf-tool finds your compiler, fills in
+  the scripts and the Codeforces language, and writes a starter template.
+- **Local testing**: per sample CPU time and memory, a timeout from the problem's
+  time limit, and a failed sample's output shown next to the answer.
 - **Pleasant prompts.** Arrow keys, a number key per item, type-to-filter for long lists
   (like the languages); plain numbered input when not on a terminal.
 
@@ -44,7 +46,7 @@ To update later, `cf upgrade` tells you the command for the newest release.
 ## Quick start
 
 ```bash
-cf config          # menu: login, add a template (alias, suffixes, scripts), ...
+cf config          # first time: log in, pick your languages (compilers are found for you)
 cf race 1136       # countdown -> opens pages -> parses samples into ./cf/contest/1136/
 cd cf/contest/1136/a
 cf gen             # your default template as a.cpp
@@ -67,12 +69,25 @@ cf race [spec...]              countdown, then open + parse the contest
 cf pull [ac] [spec...]         download your submitted codes
 cf clone [ac] [handle]         download all codes of a user
 cf upgrade                     check GitHub for a newer release
+cf completion [shell]          Tab-completion script for bash, zsh or fish
+cf doctor                      check languages, compilers, login and Chrome
 ```
 
 A **specifier** is anything useful: `1136`, `1136a`, `a`, `gym 100001`, a full
 problem/contest/group URL, etc. Without one, the contest/problem is inferred from the
 current directory (layout `<root>/<contest|gym|group|acmsguru>/<contestID>/<problemID>/`,
 root folder name defaults to `cf`).
+
+### Tab completion
+
+Commands, options, `cf gen` aliases, file names, and specifiers like `546D` for the code
+files in the current folder:
+
+```bash
+eval "$(cf completion zsh)"     # in ~/.zshrc, after compinit
+eval "$(cf completion bash)"    # in ~/.bashrc (bash 4.4+)
+cf completion fish | source     # in ~/.config/fish/config.fish
+```
 
 ### Which file `cf submit` sends
 
@@ -99,14 +114,27 @@ problem can come from the chosen file's name (`546D.cpp`, `546/D.cpp`) after a
 confirmation, and a file named for another problem than the one you asked for needs
 an explicit yes.
 
-### Templates
+### Languages and templates
 
-In code (`cf gen`): `$%U%$` handle, `$%Y%$ $%M%$ $%D%$ $%h%$ $%m%$ $%s%$` date/time.
-In scripts (`cf test`): `$%path%$`, `$%full%$` (a.cpp), `$%file%$` (a), `$%rand%$`.
+`cf config` → **Add a language** sets up C++, Python, Java, Kotlin, Rust, Go or C in a
+few questions: it finds the compilers on your machine, fills in the compile and run
+scripts, picks the newest Codeforces language of that family, and writes a starter
+template to `~/.config/cf/templates/` for you to edit. On macOS, where `g++` is
+really Apple clang, cf-tool brings its own `bits/stdc++.h` (or uses Homebrew's GCC)
+and raises the stack limit to Codeforces' 256 MB. Anything else: pick **Something
+else** and write the scripts yourself.
 
-Example C++ template: before script `g++ -O2 -o $%file%$ $%full%$`, script
-`./$%file%$`, after script `rm $%file%$`. Starter templates are in
-[`templates/`](templates).
+Placeholders in code (`cf gen`): `$%U%$` handle, `$%Y%$ $%M%$ $%D%$ $%h%$ $%m%$ $%s%$`
+date/time. In scripts (`cf test`): `$%path%$`, `$%full%$` (a.cpp), `$%file%$` (a),
+`$%rand%$`.
+
+### What `cf test` checks
+
+Each sample's output against its answer, line by line, with CPU time and memory.
+`cf parse` saves the problem's time and memory limits (in `.cf-problem.json`, next to
+the samples): a sample that runs a few times past the time limit is stopped, and runs
+over a limit are flagged. A program that crashes shows what it printed. Interactive
+problems are recognized and not judged.
 
 ## Files
 
@@ -115,12 +143,16 @@ Example C++ template: before script `g++ -O2 -o $%file%$ $%full%$`, script
 - `$XDG_STATE_HOME/cf/session` (default `~/.local/state/cf/session`, mode 0600) —
   handle, AES-GCM-encrypted password, cookies + the User-Agent they belong to, last
   submission
+- `~/.config/cf/templates/` — starter templates from **Add a language**;
+  `~/.config/cf/include/` — cf-tool's `bits/stdc++.h` for clang
+- `.cf-problem.json` in each problem folder — limits and sample layout for `cf test`
 
 **Coming from the Go tool?** Its `~/.cf/config` and `~/.cf/session` are copied over on
 first run, stored login included; `~/.cf` itself is left untouched.
 
 ## Troubleshooting
 
+- `cf doctor` checks your setup and says how to fix what's wrong.
 - `CF_DEBUG=1 cf <command>` prints the full traceback along with the error.
 - A browser window opened during login: Cloudflare wants a human check — complete it
   there; the login form is filled in for you.
@@ -133,6 +165,7 @@ first run, stored login included; `~/.cf` itself is left untouched.
 ```bash
 uv sync --extra dev
 uv run pytest      # offline tests; the browser and login logic run against fakes
+uv run pytest -m live   # checks the parsers against the real site (public pages only)
 uv run black cf_tool tests && uv run flake8 --max-line-length=100 --extend-ignore=E203,W503 cf_tool tests
 ```
 

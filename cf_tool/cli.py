@@ -13,6 +13,7 @@ from __future__ import annotations
 import functools
 import getpass
 import os
+import platform
 import re
 import sys
 import traceback
@@ -20,8 +21,9 @@ import webbrowser
 from pathlib import Path
 
 import click
+from click.shell_completion import CompletionItem, get_completion_class
 
-from cf_tool import __version__, codefiles, judge, templates, ui, views
+from cf_tool import __version__, codefiles, judge, langs, presets, templates, ui, views
 from cf_tool import config as config_module
 from cf_tool.args import Info, parse_args
 from cf_tool.client import Client
@@ -70,12 +72,15 @@ def cf_command(f):
 
 @click.group()
 @click.version_option(__version__, prog_name="cf")
-def main() -> None:
+@click.pass_context
+def main(ctx: click.Context) -> None:
     """Codeforces Tool (cf). A Python port of xalanq/cf-tool.
 
     Run "cf config" first to set your handle, password and code templates.
     If you want to compete, the best command is "cf race".
     """
+    if ctx.invoked_subcommand == "completion":
+        return  # NOTE: its output is a script the shell evaluates; notes would break it
     try:
         notes = config_module.import_legacy_dir()
     except OSError as e:
@@ -118,20 +123,123 @@ def _config_login(client: Client) -> None:
     client.config_login(handle_or_email, password)
 
 
-def _config_add_template(cfg: Config, client: Client) -> None:
-    ui.cyan("Add a template")
+def _short(path: str | Path) -> str:
+    """path with the home folder written as ~, for messages."""
+    text, home = str(path), str(Path.home())
+    return "~" + text[len(home) :] if text == home or text.startswith(home + os.sep) else text
+
+
+def _languages(client: Client) -> dict[str, str]:
+    """Codeforces' languages, with a note when the list is cf-tool's own."""
     languages, live = client.languages()
     if not live:
-        ui.yellow("Not logged in: showing a built-in language list (login first for the live one).")
-    lang = ui.select(
-        "Language (type to filter):",
-        [
-            (f"{lid:>3}  {name}", lid)
-            for lid, name in sorted(languages.items(), key=lambda kv: kv[1])
-        ],
-        search=True,
+        ui.yellow(
+            "Not logged in: using cf-tool's built-in language list (log in for the current one)."
+        )
+    return languages
+
+
+def _pick_language(languages: dict[str, str], preset: presets.Preset | None = None) -> str:
+    """A Codeforces language id, picked by family, then version (best first):
+    - with a preset: among its family
+    - otherwise, or when the list lacks that family: the family first"""
+    options = presets.family(preset, languages) if preset else []
+    if not options:
+        groups = langs.by_family(languages)
+        order = [p.ext for p in presets.PRESETS if p.ext in groups]
+        order += sorted((ext for ext in groups if ext not in order), key=langs.family_name)
+        ext = ui.select(
+            "Which language?",
+            [(f"{langs.family_name(ext)}  ({len(groups[ext])})", ext) for ext in order],
+        )
+        preset = presets.find(ext)
+        best = presets.family(preset, languages) if preset else []
+        options = best + [member for member in groups[ext] if member not in best]
+    family = preset.name if preset else langs.family_name(langs.ext_of(options[0][1]))
+    return ui.select(
+        f"Submit {family} as:",
+        [(name, lid) for lid, name in options],
+        default=options[0][0],
+        search=len(options) > ui.MAX_SHORTCUTS,
     )
-    ui.green(f"{lang}  {languages.get(lang, '')}")
+
+
+def _config_add_language(cfg: Config, client: Client) -> bool:
+    """Set up a language from its preset; returns whether a template was added.
+    - a compiler found here; several: the user picks
+    - the Codeforces language of that family; the best is pre-selected
+    - a starter template written to the config folder"""
+    preset = ui.select(
+        "Which language?",
+        [(p.name, p) for p in presets.PRESETS] + [("Something else (your own scripts)", None)],
+    )
+    if preset is None:
+        _config_add_template(cfg, client)
+        return True
+    machine = presets.Machine()
+    with ui.status(f"Looking for {preset.name} compilers..."):
+        chains = preset.detect(machine)
+    if not chains:
+        ui.red(
+            f"No {preset.name} compiler found. To get one: {preset.install_hint(machine.platform)}"
+        )
+        return False
+    chain = chains[0]
+    if len(chains) > 1:
+        chain = ui.select(
+            f"Which {preset.name} compiler?", [(c.label, c) for c in chains], default=chain
+        )
+    if chain.needs_shim:
+        ui.yellow(f"{chain.label} has no bits/stdc++.h, so cf-tool adds one.")
+        if all(c.needs_shim for c in chains):
+            ui.yellow(f"For GCC, which Codeforces uses: {preset.install_hint(machine.platform)}")
+    languages = _languages(client)
+    lang = _pick_language(languages, preset)
+    template = presets.make_template(preset, chain, lang)
+    same = next((i for i, t in enumerate(cfg.template) if t.alias == template.alias), None)
+    if same is not None:
+        if not ui.confirm(f'Replace your "{template.alias}" template?', default=False):
+            return False
+        cfg.template[same] = template
+    else:
+        cfg.template.append(template)
+        if len(cfg.template) == 1 or ui.confirm(
+            f"Use {preset.name} by default (cf gen, cf parse)?", default=False
+        ):
+            cfg.default = len(cfg.template) - 1
+    cfg.save()
+    ui.green(f"Added {preset.name}: {chain.label}, submitting as {languages.get(lang, lang)}.")
+    ui.plain(f"Your template: {_short(template.path)} (cf gen copies it; edit it freely)")
+    return True
+
+
+def _config_wizard(cfg: Config, client: Client) -> None:
+    """The first `cf config`: log in, set up languages, then say what's next."""
+    ui.cyan("Welcome to cf-tool! Two steps: log in, then pick your languages.")
+    if client.handle:
+        ui.green(f"Logged in as {client.handle}")
+    elif ui.confirm("Log in to Codeforces now?", default=True):
+        try:
+            _config_login(client)
+        except CFError as e:
+            ui.red(str(e))
+            ui.yellow("Not logged in; `cf config` can log in later.")
+    added = False
+    while True:
+        added = _config_add_language(cfg, client) or added
+        if not ui.confirm("Add another language?", default=False):
+            break
+    cfg.save()  # NOTE: the config file now exists, so the next `cf config` shows the menu
+    if added:
+        ui.green("All set. Next: cf parse 4A, cd cf/contest/4/a, then cf gen, cf test, cf submit.")
+    else:
+        ui.yellow("No language set up yet: run `cf config` again once a compiler is installed.")
+
+
+def _config_add_template(cfg: Config, client: Client) -> None:
+    """Set up a language by hand: template file, suffixes, alias and scripts."""
+    ui.cyan("Add a template")
+    lang = _pick_language(_languages(client))
 
     ui.plain(_TEMPLATE_PLACEHOLDERS)
     path = ui.path(
@@ -261,15 +369,19 @@ def _config_toggle_gen(cfg: Config) -> None:
 @main.command()
 @cf_command
 def config() -> None:
-    """Configure handle, password, templates, host and folders."""
+    """Log in and set up languages (a short wizard the first time); also
+    templates, host, proxy and folders."""
     cfg, client = _setup()
+    if not cfg.path.exists():
+        _config_wizard(cfg, client)
+        return
     while True:
         gen_state = "on" if cfg.gen_after_parse else "off"
         action = ui.select(
             "Configure cf-tool:",
             [
                 ("Login", "login"),
-                ("Add a template", "add"),
+                ("Add a language", "add"),
                 ("Delete a template", "delete"),
                 ("Set default template", "default"),
                 (f'Toggle "gen after parse"  [{gen_state}]', "gen"),
@@ -283,7 +395,7 @@ def config() -> None:
             break
         {
             "login": lambda: _config_login(client),
-            "add": lambda: _config_add_template(cfg, client),
+            "add": lambda: _config_add_language(cfg, client),
             "delete": lambda: _config_remove_template(cfg),
             "default": lambda: _config_set_default(cfg),
             "gen": lambda: _config_toggle_gen(cfg),
@@ -293,12 +405,93 @@ def config() -> None:
         }[action]()
 
 
+# --------------------------------------------------------------- completion
+
+
+_TYPE_WORDS = ("contest", "gym", "group", "acmsguru")
+
+
+def _words(incomplete: str, words) -> list[CompletionItem]:
+    """Completions: the words that start with what was typed so far."""
+    typed = incomplete.lower()
+    return [CompletionItem(w) for w in dict.fromkeys(words) if w.lower().startswith(typed)]
+
+
+def _offer(*words: str):
+    """A Tab completer that offers exactly these words."""
+    return lambda ctx, param, incomplete: _words(incomplete, words)
+
+
+def _problems_here() -> list[str]:
+    """Specifiers (546D) that code files in the current folder are named for."""
+    try:
+        suffixes = {f".{s}" for template in Config.load().template for s in template.suffix}
+        cwd = Path.cwd()
+        names = [
+            codefiles.named_target(entry.name, cwd)
+            for entry in cwd.iterdir()
+            if entry.suffix in suffixes and entry.is_file()
+        ]
+    except (CFError, OSError):
+        return []  # NOTE: a broken config or folder only costs the suggestions
+    return sorted(
+        f"{contest}{problem.upper()}" for contest, problem in names if contest and problem
+    )
+
+
+def _specifiers(*extra: str):
+    """A Tab completer for specifiers. It offers:
+    - the extra words (all, ac)
+    - the problem types (contest, gym, ...)
+    - the problems this folder's code files are named for (546D)"""
+    return lambda ctx, param, incomplete: _words(
+        incomplete, [*extra, *_TYPE_WORDS, *_problems_here()]
+    )
+
+
+def _aliases(ctx, param, incomplete: str) -> list[CompletionItem]:
+    """Tab completions for `cf gen`: the template aliases, each with its file."""
+    try:
+        templates = Config.load().template
+    except CFError:
+        return []
+    paths: dict[str, str] = {}
+    for template in templates:
+        paths.setdefault(template.alias, template.path)
+    return [CompletionItem(a, help=p) for a, p in paths.items() if a.startswith(incomplete)]
+
+
+@main.command()
+@click.argument("shell", required=False, type=click.Choice(["bash", "zsh", "fish"]))
+@cf_command
+def completion(shell: str | None) -> None:
+    """Print the Tab-completion script for bash, zsh or fish.
+
+    \b
+    zsh:   eval "$(cf completion zsh)"    in ~/.zshrc
+    bash:  eval "$(cf completion bash)"   in ~/.bashrc (bash 4.4+)
+    fish:  cf completion fish | source    in ~/.config/fish/config.fish
+    """
+    shell = shell or Path(os.environ.get("SHELL", "")).name
+    script = get_completion_class(shell)
+    if script is None:
+        raise CFError(f'Cannot tell your shell ("{shell}"): run `cf completion zsh`, bash or fish')
+    click.echo(script(main, {}, "cf", "_CF_COMPLETE").source())
+
+
 # ----------------------------------------------------------------- commands
 
 
 @main.command()
-@click.option("-f", "--file", "file_arg", default=None, help='Path to file, e.g. "a.cpp"')
-@click.argument("specifiers", nargs=-1)
+@click.option(
+    "-f",
+    "--file",
+    "file_arg",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help='Path to file, e.g. "a.cpp"',
+)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers())
 @cf_command
 def submit(file_arg: str | None, specifiers: tuple[str, ...]) -> None:
     """Submit a solution (auto-detects file, contest and problem)."""
@@ -314,7 +507,44 @@ def submit(file_arg: str | None, specifiers: tuple[str, ...]) -> None:
     )
     info = _submit_target(info, filename, specifiers, cfg)
     source = codefiles.read_source(filename)
-    client.submit(info, cfg.template[index].lang, source, filename=filename)
+    template = cfg.template[index]
+    client.submit(
+        info,
+        template.lang,
+        source,
+        filename=filename,
+        replace_language=lambda lang_id, offered: _replace_language(
+            cfg, template, lang_id, offered
+        ),
+    )
+
+
+def _replace_language(cfg: Config, template: CodeTemplate, lang_id: str, offered: dict) -> str:
+    """The language to submit as when the submit form lacks lang_id (retired,
+    or not allowed in this contest): the user's pick from the template's
+    family there, best first; kept in the template after a yes."""
+    old = langs.LANGS.get(lang_id) or f"language {lang_id}"
+    preset = presets.family_of(template, offered)
+    if preset is not None:
+        options = presets.family(preset, offered)
+    else:
+        groups = langs.by_family(offered)
+        exts = [*template.suffix, langs.ext_of(old)]
+        options = next((groups[ext] for ext in exts if ext in groups and ext != "txt"), [])
+    if not options:
+        raise CFError(f"The submit form doesn't offer {old}, nor anything like it")
+    new_id = ui.select(
+        f"The submit form doesn't offer {old}. Submit as:",
+        [(name, lid) for lid, name in options] + [("Don't submit", None)],
+        default=options[0][0],
+    )
+    if new_id is None:
+        raise CFError("Not submitted")
+    name = offered[new_id]
+    if ui.confirm(f'Use {name} in your "{template.alias}" template from now on?', default=True):
+        template.lang = new_id
+        cfg.save()
+    return new_id
 
 
 def _label(contest: str, problem: str) -> str:
@@ -350,8 +580,31 @@ def _submit_target(info: Info, filename: str, specifiers: tuple[str, ...], cfg: 
     return info
 
 
+_MARKS = {"ok": ("✓ ", "green"), "warn": ("! ", "yellow"), "error": ("✗ ", "red")}
+
+
+@main.command()
+@cf_command
+def doctor() -> None:
+    """Check the setup (languages, compilers, login, Chrome) and say how to fix it."""
+    from cf_tool import doctor as checks
+
+    ui.plain(f"cf-tool {__version__}, Python {platform.python_version()}, {sys.platform}")
+    try:
+        cfg, client = _setup()
+        findings = checks.run(cfg, client)
+    except CFError as e:  # NOTE: a broken config is a finding too
+        findings = [checks.Finding(checks.ERROR, str(e))]
+    for finding in findings:
+        ui.line(_MARKS[finding.level], (finding.text, ""))
+        if finding.fix:
+            ui.line(("    " + finding.fix, "cyan"))
+    if any(finding.level == checks.ERROR for finding in findings):
+        sys.exit(1)
+
+
 @main.command("list")
-@click.argument("specifiers", nargs=-1)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers())
 @cf_command
 def list_(specifiers: tuple[str, ...]) -> None:
     """List problems' stats of a contest."""
@@ -361,7 +614,7 @@ def list_(specifiers: tuple[str, ...]) -> None:
 
 
 @main.command()
-@click.argument("specifiers", nargs=-1)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers())
 @cf_command
 def parse(specifiers: tuple[str, ...]) -> None:
     """Download samples into <root>/<type>/<contest>/<problem>/."""
@@ -379,7 +632,7 @@ def parse(specifiers: tuple[str, ...]) -> None:
 
 
 @main.command()
-@click.argument("alias", required=False)
+@click.argument("alias", required=False, shell_complete=_aliases)
 @cf_command
 def gen(alias: str | None) -> None:
     """Generate a code file from a template into the current directory."""
@@ -388,7 +641,7 @@ def gen(alias: str | None) -> None:
 
 
 @main.command()
-@click.argument("file_arg", metavar="[FILE]", required=False)
+@click.argument("file_arg", metavar="[FILE]", required=False, type=click.Path(dir_okay=False))
 @cf_command
 def test(file_arg: str | None) -> None:
     """Compile and run the solution against all in{i}.txt/ans{i}.txt pairs."""
@@ -398,7 +651,7 @@ def test(file_arg: str | None) -> None:
 
 
 @main.command()
-@click.argument("specifiers", nargs=-1)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers("all"))
 @cf_command
 def watch(specifiers: tuple[str, ...]) -> None:
     """Watch the last 10 submissions of a contest ("cf watch all" for all)."""
@@ -410,7 +663,7 @@ def watch(specifiers: tuple[str, ...]) -> None:
 
 
 @main.command("open")
-@click.argument("specifiers", nargs=-1)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers())
 @cf_command
 def open_(specifiers: tuple[str, ...]) -> None:
     """Open the problem (or contest) page in the browser."""
@@ -420,7 +673,7 @@ def open_(specifiers: tuple[str, ...]) -> None:
 
 
 @main.command()
-@click.argument("specifiers", nargs=-1)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers())
 @cf_command
 def stand(specifiers: tuple[str, ...]) -> None:
     """Open the standings page in the browser."""
@@ -430,7 +683,7 @@ def stand(specifiers: tuple[str, ...]) -> None:
 
 
 @main.command()
-@click.argument("specifiers", nargs=-1)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers())
 @cf_command
 def sid(specifiers: tuple[str, ...]) -> None:
     """Open a submission page (defaults to your last submission)."""
@@ -442,7 +695,7 @@ def sid(specifiers: tuple[str, ...]) -> None:
 
 
 @main.command()
-@click.argument("specifiers", nargs=-1)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers())
 @click.pass_context
 @cf_command
 def race(ctx: click.Context, specifiers: tuple[str, ...]) -> None:
@@ -457,7 +710,7 @@ def race(ctx: click.Context, specifiers: tuple[str, ...]) -> None:
 
 
 @main.command()
-@click.argument("specifiers", nargs=-1)
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers("ac"))
 @cf_command
 def pull(specifiers: tuple[str, ...]) -> None:
     """Pull your (latest or "ac") submission codes into ./<problem>/."""
@@ -469,7 +722,7 @@ def pull(specifiers: tuple[str, ...]) -> None:
 
 
 @main.command()
-@click.argument("args", nargs=-1, metavar="[ac] [HANDLE]")
+@click.argument("args", nargs=-1, metavar="[ac] [HANDLE]", shell_complete=_offer("ac"))
 @cf_command
 def clone(args: tuple[str, ...]) -> None:
     """Clone all submission codes of a user."""

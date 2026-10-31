@@ -73,8 +73,9 @@ python_files = "test_*.py"
 python_functions = "test_*"
 markers = [
     "live: tests that hit the real Codeforces site (opt-in: pytest -m live)",
+    "toolchain: tests that run this machine's compilers (opt-in: pytest -m toolchain)",
 ]
-addopts = "-m 'not live'"
+addopts = "-m 'not live and not toolchain'"
 
 [tool.mypy]
 python_version = "3.10"

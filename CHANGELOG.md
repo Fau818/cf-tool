@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- **Language presets and a setup wizard**: `cf config` asks which language (C++,
+  Python, Java, Kotlin, Rust, Go, C), finds the compiler, fills in the scripts and the
+  newest Codeforces language of that family, and writes a starter template. On macOS:
+  a `bits/stdc++.h` for clang and Codeforces' 256 MB stack. Languages set up by hand
+  are picked by family too.
+- **`cf doctor`** checks templates, compilers, the login and Chrome, and says how to
+  fix what's wrong.
+- **`cf test`** stops a sample that runs a few times past the problem's time limit
+  (saved by `cf parse`), flags runs over the time or memory limit, shows what a
+  crashing program printed, and won't judge interactive problems.
+- **`cf submit`** names the language it submits as; when Codeforces no longer offers
+  the template's language, it offers that family's current ones.
+- The built-in language table (used when not logged in) had wrong ids for G++23,
+  Kotlin, Java 8 and C#; fixed.
+- **Tab completion** for bash, zsh and fish (`cf completion`): commands, options,
+  `cf gen` aliases, file names, and specifiers like `546D` from the current folder.
+- Live checks against codeforces.com (`pytest -m live`, public pages only) tell when
+  its markup drifts away from the parsers.
+- CI runs on current GitHub Actions (checkout v7, setup-uv v10).
+
 ## 0.3.0a1 — first public alpha (2026-10)
 
 A Python port of xalanq/cf-tool for today's Cloudflare-protected Codeforces.

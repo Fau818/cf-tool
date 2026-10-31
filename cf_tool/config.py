@@ -148,6 +148,11 @@ class Config:
         }
         write_atomic(self._path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
+    @property
+    def path(self) -> Path:
+        """Where this config is read from and saved to."""
+        return self._path
+
     def templates_by_alias(self, alias: str) -> list[CodeTemplate]:
         return [t for t in self.template if t.alias == alias]
 

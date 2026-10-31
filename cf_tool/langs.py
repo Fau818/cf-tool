@@ -1,29 +1,54 @@
 """Codeforces submission languages: id -> name, and name -> file extension.
 
-LANGS is a static fallback for display purposes; the authoritative list is
-parsed live from the submit page's <select name="programTypeId"> when adding
-a template (pages.parse_languages), since Codeforces retires IDs over time.
+LANGS is the fallback for when the live list can't be read (not logged in);
+the authoritative one is parsed from the submit page's
+<select name="programTypeId"> (pages.parse_languages), since Codeforces
+retires and renumbers languages over time.
 """
 
 from __future__ import annotations
 
 import re
 
+# NOTE: ids as Codeforces' submit form has them (checked against the cph
+# \     extension's table, 2026-09); setup reads the live form when logged in
 LANGS: dict[str, str] = {
     "43": "GNU GCC C11 5.1.0",
+    "52": "Clang++17 Diagnostics",
+    "50": "GNU G++14 6.4.0",
     "54": "GNU G++17 7.3.0",
-    "73": "GNU G++20 13.2 (64 bit, winlibs)",
-    "89": "GNU G++23 14.2 (64 bit, msys2)",
-    "31": "Python 3.8.10",
-    "70": "PyPy 3.10 (7.3.15, 64bit)",
-    "87": "Java 21 64bit",
-    "74": "Java 8 32bit",
-    "75": "Rust 2021 (1.75.0)",
+    "61": "GNU G++17 9.2.0 (64 bit, msys 2)",
+    "89": "GNU G++20 13.2 (64 bit, winlibs)",
+    "91": "GNU G++23 14.2 (64 bit, msys2)",
+    "59": "Microsoft Visual C++ 2017",
+    "65": "C# 8, .NET Core 3.1",
+    "79": "C# 10, .NET SDK 6.0",
+    "9": "C# Mono 6.8",
+    "28": "D DMD32 v2.105.0",
     "32": "Go 1.22.2",
-    "48": "Kotlin 1.9.21",
-    "55": "Node.js 15.8.0 (64bit)",
+    "12": "Haskell GHC 8.10.1",
+    "87": "Java 21 64bit",
+    "60": "Java 11.0.6",
+    "36": "Java 8 32bit",
+    "83": "Kotlin 1.7.20",
+    "88": "Kotlin 1.9.21",
+    "19": "OCaml 4.02.1",
+    "3": "Delphi 7",
+    "4": "Free Pascal 3.2.2",
+    "51": "PascalABC.NET 3.8.3",
+    "13": "Perl 5.20.1",
+    "6": "PHP 8.1.7",
+    "7": "Python 2.7.18",
+    "31": "Python 3.13.2",
+    "40": "PyPy 2.7.13 (7.3.0)",
+    "41": "PyPy 3.6.9 (7.3.0)",
+    "70": "PyPy 3.10 (7.3.15, 64bit)",
     "67": "Ruby 3.2.2",
-    "9": "C# 8, .NET Core 3.1",
+    "75": "Rust 1.89.0 (2021)",
+    "98": "Rust 1.89.0 (2024)",
+    "20": "Scala 2.12.8",
+    "34": "JavaScript V8 4.8.0",
+    "55": "Node.js 15.8.0 (64bit)",
 }
 
 # Codeforces spells one language three ways: the submit menu ("GNU G++17
@@ -65,6 +90,60 @@ _EXT_RULES: list[tuple[re.Pattern[str], str]] = [
         (r"Secret", "secret_171"),
     ]
 ]
+
+
+# family display names by file extension; unknown names are "Other" (txt)
+FAMILY_NAMES = {
+    "cpp": "C++",
+    "c": "C",
+    "py": "Python",
+    "java": "Java",
+    "kt": "Kotlin",
+    "rs": "Rust",
+    "go": "Go",
+    "cs": "C#",
+    "fs": "F#",
+    "qs": "Q#",
+    "js": "JavaScript",
+    "pas": "Pascal",
+    "hs": "Haskell",
+    "ml": "OCaml",
+    "scala": "Scala",
+    "d": "D",
+    "pl": "Perl",
+    "php": "PHP",
+    "rb": "Ruby",
+    "tcl": "Tcl",
+    "bf": "Befunge",
+    "pike": "Pike",
+    "io": "Io",
+    "factor": "Factor",
+    "cbl": "COBOL",
+    "adb": "Ada",
+    "f": "FALSE",
+    "secret_171": "Secret",
+}
+
+
+def family_name(ext: str) -> str:
+    """Display name of the language family with this extension ("C++")."""
+    return FAMILY_NAMES.get(ext, "Other")
+
+
+def newest_first_key(name: str) -> tuple:
+    """Sort key putting the highest version numbers in a name first."""
+    return tuple(-int(n) for n in re.findall(r"\d+", name)), name
+
+
+def by_family(languages: dict[str, str]) -> dict[str, list[tuple[str, str]]]:
+    """(id, name) languages grouped by file extension, each group newest first."""
+    groups: dict[str, list[tuple[str, str]]] = {}
+    for lid, name in languages.items():
+        groups.setdefault(ext_of(name), []).append((lid, name))
+    return {
+        ext: sorted(group, key=lambda item: newest_first_key(item[1]))
+        for ext, group in groups.items()
+    }
 
 
 def name_of(lang_id: str, langs: dict[str, str] | None = None) -> str:

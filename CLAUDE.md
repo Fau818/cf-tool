@@ -25,6 +25,8 @@ check the Go originals first (reference copies in `.go_ref/`, gitignored).
 uv sync --extra dev          # .venv from uv.lock (CI uses --locked: re-run `uv lock`
                              #   after changing dependencies)
 uv run pytest                # offline unit tests (live tests are opt-in: -m live)
+uv run pytest -m live        # tests/test_live.py: public pages vs the parsers (no login)
+uv run pytest -m toolchain   # every preset's starter, built with this machine's compilers
 uv run black cf_tool/ tests/
 uv run flake8 --max-line-length=100 --extend-ignore=E203,W503 cf_tool/ tests/
 uv tool install --reinstall .   # refresh the global `cf` (a copy: re-run after changes)
@@ -36,7 +38,8 @@ uv tool install --reinstall .   # refresh the global `cf` (a copy: re-run after 
 cf_tool/
 ├── cli.py        # Click commands; each body is thin (resolve Info -> one call).
 │                 #   cf_command turns CFError/OSError into a red line
-│                 #   (CF_DEBUG=1 also prints the traceback)
+│                 #   (CF_DEBUG=1 also prints the traceback); Tab completers
+│                 #   (`cf completion`) must stay fast and never raise or print
 ├── args.py       # parse_args(): specifier/path -> Info (port of cmd/args.go).
 │                 #   Explicit args win; cwd fills blanks; >=6-digit id => gym;
 │                 #   acmsguru rewrites contest->99999. Info builds all URLs/paths.
@@ -57,13 +60,21 @@ cf_tool/
 ├── crypto.py     # AES-GCM password obfuscation, byte-compatible with Go tool
 ├── pages.py      # ALL HTML/JSON parsing (regex + bs4): handle, csrf, samples,
 │                 #   problems table, languages, submissions, countdown, gates
+├── presets.py    # language presets: toolchain detection (macOS's /usr/bin
+│                 #   stubs are probed only once their tools exist), scripts,
+│                 #   best Codeforces language per family, starter templates,
+│                 #   bits/stdc++.h for clang; output is an ordinary CodeTemplate
+├── problem.py    # .cf-problem.json in each problem folder: limits, interactive,
+│                 #   test case per sample line (written by parse, read by test)
+├── doctor.py     # cf doctor's checks (read-only; no browser)
 ├── codefiles.py  # which code file: candidates by template suffix (+ the target's
 │                 #   folders 546/, 546/D/, 546D/ for submit, and the problem's files
 │                 #   around them when cwd is inside); the problem's files first,
 │                 #   newest first, with edit times; source decoding
 ├── templates.py  # placeholder substitution, cf gen
 ├── judge.py      # cf test: before_script/script/after_script, in/ans pairs,
-│                 #   per-line-trim comparison, CPU time + peak RSS, Go's splitCmd
+│                 #   per-line-trim comparison, CPU time + peak RSS, Go's splitCmd;
+│                 #   kills a sample past timeout_for(the saved time limit)
 ├── langs.py      # static language-id fallback; language name -> file extension
 ├── ui.py         # markup-free console lines, spinner, questionary prompts with
 │                 #   a plain typed-input fallback for no-TTY
@@ -104,8 +115,13 @@ cf_tool/
 - **Directory model**: `<root>/<type folder>/<contestID>/<problemID>/`, root folder
   name configurable (default `cf`). If no root is found among cwd ancestors, commands
   create `./cf/...` under cwd (Go behavior).
-- **No hardcoded compilers**: test/submit are language-agnostic through template
-  suffix matching and the three scripts. Don't add per-language logic.
+- **No hardcoded compilers in test/submit**: they stay language-agnostic through
+  template suffix matching and the three scripts. Per-language knowledge lives only in
+  presets.py, which writes ordinary templates at setup (the config keeps the Go tool's
+  schema). `pytest -m toolchain` builds every starter with the machine's compilers
+  (CI runs it on Linux and macOS, which have them all).
+- **Language ids**: `langs.LANGS` is only a fallback (setup when not logged in); the
+  submit form's list is the truth, and `cf submit` checks the template's id against it.
 - **Parsing stays in pages.py** with fixture-style unit tests in tests/test_pages.py —
   when Codeforces markup changes, fix it there only. `tests/fixtures/` holds pages
   trimmed from the live site (2026-10-12); refresh them when markup drifts.
@@ -114,9 +130,12 @@ cf_tool/
 
 ## Testing against real Codeforces
 
-Unit tests are offline (browser and gateway logic run against fakes). For live
-verification use an isolated XDG_CONFIG_HOME/XDG_STATE_HOME so the real session is not
-touched, old practice problems (e.g. problemset 4A / contest 1136), throttle polling to
->=1s, and vary submitted source (timestamp comment) to dodge the duplicate-submission
-rejection. Never automate against a rated running contest. Chrome cannot start inside
-Claude Code's sandbox, so browser tiers need the user to run the command.
+Unit tests are offline (browser and gateway logic run against fakes).
+`tests/test_live.py` (`-m live`) fetches public pages over plain HTTP and runs the
+parsers on them; a Cloudflare check on the connection skips a test. For live
+verification beyond that use an isolated XDG_CONFIG_HOME/XDG_STATE_HOME so the real
+session is not touched, old practice problems (e.g. problemset 4A / contest 1136),
+throttle polling to >=1s, and vary submitted source (timestamp comment) to dodge the
+duplicate-submission rejection. Never automate against a rated running contest.
+Chrome cannot start inside Claude Code's sandbox, so browser tiers need the user to
+run the command.

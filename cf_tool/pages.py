@@ -129,6 +129,72 @@ def find_samples(body: str) -> tuple[list[str], list[str]]:
     return [_pre_to_text(s) for s in inputs], [_pre_to_text(s) for s in outputs]
 
 
+_TITLE_RE = re.compile(r'class="header"><div class="title">([\s\S]*?)</div>')
+_TIME_LIMIT_RE = re.compile(
+    r'class="time-limit"><div class="property-title">[^<]*</div>\s*([\d.]+)'
+)
+_MEMORY_LIMIT_RE = re.compile(
+    r'class="memory-limit"><div class="property-title">[^<]*</div>\s*(\d+)'
+)
+_INTERACTION_RE = re.compile(
+    r'class="section-title">\s*(?:Interaction|Протокол взаимодействия)\s*<'
+)
+_SAMPLE_LINE_RE = re.compile(
+    r'<div class="[^"]*\btest-example-line-(\d+)\b[^"]*"[^>]*>([\s\S]*?)</div>'
+)
+
+
+@dataclass
+class ProblemHeader:
+    name: str  # "A. Watermelon"
+    time_limit: float | None  # seconds
+    memory_limit: int | None  # megabytes
+    interactive: bool
+
+
+def find_problem_header(body: str) -> ProblemHeader:
+    """A problem page's title, limits and whether it is interactive (a limit
+    the page doesn't show, as on acmsguru, is None)."""
+    title = _TITLE_RE.search(body)
+    time_limit = _TIME_LIMIT_RE.search(body)
+    memory_limit = _MEMORY_LIMIT_RE.search(body)
+    return ProblemHeader(
+        name=html_lib.unescape(_TAG_RE.sub("", title.group(1))).strip() if title else "",
+        time_limit=float(time_limit.group(1)) if time_limit else None,
+        memory_limit=int(memory_limit.group(1)) if memory_limit else None,
+        interactive=bool(_INTERACTION_RE.search(body)),
+    )
+
+
+def _line_cases(inner: str) -> list[int] | None:
+    """The test case of each line of a sample <pre>, as its text keeps them;
+    None for the classic markup, which doesn't say."""
+    if "test-example-line" not in inner:
+        return None
+    lines = [
+        (int(case), html_lib.unescape(_TAG_RE.sub("", text)))
+        for case, text in _SAMPLE_LINE_RE.findall(inner)
+    ]
+    # NOTE: _pre_to_text strips the whole text, which drops blank first and last lines
+    while lines and not lines[0][1].strip():
+        lines.pop(0)
+    while lines and not lines[-1][1].strip():
+        lines.pop()
+    return [case for case, _ in lines]
+
+
+def find_sample_cases(body: str) -> list[tuple[list[int], list[int]] | None]:
+    """For each sample, the test case of each input and answer line (case 0:
+    the line with the number of cases); None where the page doesn't say."""
+    found = []
+    for inner_in, inner_out in zip(_INPUT_RE.findall(body), _OUTPUT_RE.findall(body)):
+        input_cases, answer_cases = _line_cases(inner_in), _line_cases(inner_out)
+        found.append(
+            None if input_cases is None or answer_cases is None else (input_cases, answer_cases)
+        )
+    return found
+
+
 def is_standard_io(body: str) -> bool:
     return bool(_STANDARD_INPUT_RE.search(body) and _STANDARD_OUTPUT_RE.search(body))
 

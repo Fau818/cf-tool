@@ -139,9 +139,11 @@ def test_parse_gen_survives_a_failed_problem(isolated_home, tmp_path, monkeypatc
     )
 
     def fake_parse_problem(self, url, path):
+        from cf_tool.problem import ProblemInfo
+
         if url.endswith("/B"):
             raise CFError("Cannot parse sample with input 0 and output 0")
-        return 1, True
+        return 1, True, ProblemInfo()
 
     monkeypatch.setattr(Client, "parse_problem", fake_parse_problem)
     monkeypatch.setattr(
@@ -200,7 +202,7 @@ def fake_submit(isolated_home, tmp_path, monkeypatch):
     monkeypatch.chdir(work)
     record = {"submitted": [], "questions": [], "answers": [], "menus": [], "pick": None}
 
-    def submit(self, info, lang_id, source, filename=""):
+    def submit(self, info, lang_id, source, filename="", replace_language=None):
         record["submitted"].append((filename, info.contest_id, info.problem_id))
 
     def confirm(message, *, default=False):
@@ -382,3 +384,257 @@ def test_upgrade_private_or_missing_repo(monkeypatch):
     result = _upgrade_with(monkeypatch, [], "0.3.0a1", status=404)
     assert result.exit_code == 1
     assert "Cannot list the releases" in result.output
+
+
+def _completions(args: list[str], incomplete: str) -> list[str]:
+    """What Tab offers after `cf <args> <incomplete>`."""
+    from click.shell_completion import ShellComplete
+
+    items = ShellComplete(main, {}, "cf", "_CF_COMPLETE").get_completions(args, incomplete)
+    return [item.value for item in items]
+
+
+def test_complete_commands():
+    assert _completions([], "su") == ["submit"]
+
+
+def test_complete_gen_aliases(isolated_home):
+    write_config(isolated_home, dict(PY_TEMPLATE, path="tpl.py"))
+    assert _completions(["gen"], "") == ["py"]
+
+
+def test_complete_specifiers_from_code_files(isolated_home, tmp_path, monkeypatch):
+    write_config(isolated_home, dict(PY_TEMPLATE, path="tpl.py"))
+    work = tmp_path / "work"
+    work.mkdir()
+    for name in ("546D.py", "demo.py", "2171A.cpp", "notes.txt"):  # no template for .cpp
+        (work / name).write_text("")
+    monkeypatch.chdir(work)
+    assert _completions(["submit"], "") == ["contest", "gym", "group", "acmsguru", "546D"]
+    assert _completions(["submit"], "5") == ["546D"]
+    assert _completions(["watch"], "a") == ["all", "acmsguru"]
+    assert _completions(["clone"], "") == ["ac"]
+
+
+def test_complete_file_arguments():
+    from click.shell_completion import ShellComplete
+
+    complete = ShellComplete(main, {}, "cf", "_CF_COMPLETE")
+    assert [item.type for item in complete.get_completions(["submit", "-f"], "")] == ["file"]
+    assert [item.type for item in complete.get_completions(["test"], "")] == ["file"]
+
+
+def test_completion_script_is_only_the_script(isolated_home):
+    (isolated_home / ".cf").mkdir()
+    (isolated_home / ".cf" / "config").write_text("{}")  # a Go tool's config to import
+    result = CliRunner().invoke(main, ["completion", "zsh"])
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("#compdef cf") and "_CF_COMPLETE" in result.output
+    assert not (isolated_home / ".config" / "cf" / "config").exists()  # imported later
+
+
+def test_completion_follows_the_shell(monkeypatch):
+    monkeypatch.setenv("SHELL", "/usr/local/bin/fish")
+    result = CliRunner().invoke(main, ["completion"])
+    assert result.exit_code == 0 and "complete" in result.output
+    monkeypatch.setenv("SHELL", "/bin/tcsh")
+    result = CliRunner().invoke(main, ["completion"])
+    assert result.exit_code == 1 and "Cannot tell your shell" in result.output
+
+
+@pytest.fixture
+def answers(monkeypatch):
+    """Scripted prompts. Each list holds the next answers for its kind of
+    question: a select answer is the start of a label (None: the default).
+    An unscripted question fails the test; answers["asked"] records them all."""
+    from cf_tool import ui
+
+    script = {"select": [], "confirm": [], "text": [], "asked": []}
+
+    def select(message, choices, *, default=None, search=False):
+        options = [c for c in choices if not isinstance(c, ui.Heading)]
+        script["asked"].append((message, [label for label, _ in options]))
+        wanted = script["select"].pop(0)
+        if wanted is None:
+            return options[0][1] if default is None else default
+        return next(value for label, value in options if label.startswith(wanted))
+
+    def confirm(message, *, default=False):
+        script["asked"].append(message)
+        return script["confirm"].pop(0)
+
+    def text(message, **kwargs):
+        script["asked"].append(message)
+        return script["text"].pop(0)
+
+    monkeypatch.setattr(ui, "select", select)
+    monkeypatch.setattr(ui, "confirm", confirm)
+    monkeypatch.setattr(ui, "text", text)
+    monkeypatch.setattr(ui, "path", text)
+    return script
+
+
+def machine_with(monkeypatch, banners: dict[str, str], platform: str = "linux") -> None:
+    """Toolchain detection sees only these commands, printing these banners."""
+    from cf_tool import presets
+
+    machine = presets.Machine(
+        which=lambda program: f"/usr/bin/{program}" if program in banners else None,
+        version=lambda program, flag: banners[program],
+        platform=platform,
+    )
+    monkeypatch.setattr(presets, "Machine", lambda: machine)
+
+
+def live_languages(monkeypatch, live: bool = True) -> None:
+    from cf_tool import langs
+    from cf_tool.client import Client
+    from tests.test_presets import LANGUAGES
+
+    monkeypatch.setattr(
+        Client, "languages", lambda self: (LANGUAGES, True) if live else (langs.LANGS, False)
+    )
+
+
+def unanswered(script: dict) -> list:
+    return [answer for kind in ("select", "confirm", "text") for answer in script[kind]]
+
+
+def test_first_config_is_a_wizard(isolated_home, answers, monkeypatch):
+    from cf_tool import presets
+    from cf_tool.config import Config
+
+    machine_with(monkeypatch, {"g++-14": "g++-14 (GCC) 14.2.0", "clang++": "clang version 18.1.3"})
+    live_languages(monkeypatch)
+    answers["confirm"] += [False, False]  # log in now? add another language?
+    answers["select"] += ["C++", "GCC", None]  # the language, its compiler, submit as: the best
+    result = CliRunner().invoke(main, ["config"])
+    assert result.exit_code == 0, result.output
+    assert unanswered(answers) == []
+    (template,) = Config.load(isolated_home / ".config" / "cf" / "config").template
+    assert (template.alias, template.lang, template.suffix) == ("cpp", "5", ["cpp", "cc", "cxx"])
+    assert template.before_script == "g++-14 -std=c++20 -O2 -Wall -o $%file%$ $%full%$"
+    assert Path(template.path).read_text() == presets.CPP_STARTER
+    assert (
+        "Added C++: GCC 14 (g++-14), submitting as GNU G++23 14.2 (64 bit, msys2)." in result.output
+    )
+    assert "All set" in result.output
+
+
+def test_wizard_without_a_compiler(isolated_home, answers, monkeypatch):
+    machine_with(monkeypatch, {})
+    live_languages(monkeypatch)
+    answers["confirm"] += [False, False]
+    answers["select"] += ["Rust"]
+    result = CliRunner().invoke(main, ["config"])
+    assert result.exit_code == 0, result.output
+    assert "No Rust compiler found. To get one: install Rust from rustup.rs" in result.output
+    assert "No language set up yet" in result.output
+    assert (isolated_home / ".config" / "cf" / "config").exists()  # NOTE: next time, the menu
+
+
+def test_add_a_language_replacing_a_template(isolated_home, answers, monkeypatch):
+    from cf_tool.config import Config
+
+    write_config(isolated_home, dict(PY_TEMPLATE, path="tpl.py"))  # alias "py"
+    machine_with(monkeypatch, {"python3": "Python 3.12.4", "pypy3": "Python 3.10.14 (75b3de)"})
+    live_languages(monkeypatch)
+    answers["select"] += ["Add a language", "Python", "PyPy", None, "Done"]
+    answers["confirm"] += [True]  # replace the "py" template
+    result = CliRunner().invoke(main, ["config"])
+    assert result.exit_code == 0, result.output
+    assert unanswered(answers) == []
+    (template,) = Config.load(isolated_home / ".config" / "cf" / "config").template
+    assert (template.script, template.lang) == ("pypy3 $%full%$", "11")  # PyPy 3.10 64bit
+
+
+def test_clang_only_mac(isolated_home, answers, monkeypatch):
+    machine_with(monkeypatch, {"clang++": "Apple clang version 17.0.0"}, "darwin")
+    live_languages(monkeypatch, live=False)
+    answers["confirm"] += [False, False]
+    answers["select"] += ["C++", None]
+    result = CliRunner().invoke(main, ["config"])
+    assert result.exit_code == 0, result.output
+    assert "Apple clang 17 (clang++) has no bits/stdc++.h, so cf-tool adds one." in result.output
+    assert "For GCC, which Codeforces uses: brew install gcc" in result.output
+    assert "built-in language list" in result.output
+    assert (isolated_home / ".config" / "cf" / "include" / "bits" / "stdc++.h").is_file()
+
+
+def test_pick_language_by_family_first(answers):
+    from cf_tool import cli
+    from tests.test_presets import LANGUAGES
+
+    answers["select"] += ["Java", None]
+    assert cli._pick_language(LANGUAGES) == "13"  # Java 21 64bit
+    (family_question, families), (version_question, versions) = answers["asked"]
+    assert families[:4] == ["C++  (5)", "Python  (5)", "Java  (2)", "Kotlin  (2)"]
+    assert families[-1] == "JavaScript  (1)"  # NOTE: families without a preset follow, A to Z
+    assert version_question == "Submit Java as:" and versions == ["Java 21 64bit", "Java 8 32bit"]
+
+
+OFFERED = {
+    "54": "GNU G++17 7.3.0",
+    "91": "GNU G++23 14.2 (64 bit, msys2)",
+    "4": "Free Pascal 3.2.2",
+    "51": "PascalABC.NET 3.8.3",
+}
+
+
+def _template_config(tmp_path, **template):
+    from cf_tool.config import CodeTemplate, Config
+
+    cfg = Config(template=[CodeTemplate(**template)], _path=tmp_path / "config")
+    return cfg, cfg.template[0]
+
+
+def test_replace_a_retired_language(tmp_path, answers):
+    from cf_tool import cli
+    from cf_tool.config import Config
+
+    cfg, template = _template_config(tmp_path, alias="cpp", lang="89", suffix=["cpp"])
+    answers["select"] += [None]  # submit as: the best
+    answers["confirm"] += [True]  # and keep it in the template
+    assert cli._replace_language(cfg, template, "89", OFFERED) == "91"
+    assert answers["asked"] == [
+        (
+            "The submit form doesn't offer GNU G++20 13.2 (64 bit, winlibs). Submit as:",
+            ["GNU G++23 14.2 (64 bit, msys2)", "GNU G++17 7.3.0", "Don't submit"],
+        ),
+        'Use GNU G++23 14.2 (64 bit, msys2) in your "cpp" template from now on?',
+    ]
+    assert Config.load(tmp_path / "config").template[0].lang == "91"
+
+
+def test_replace_a_language_this_time_only(tmp_path, answers):
+    from cf_tool import cli
+
+    cfg, template = _template_config(tmp_path, alias="cpp", lang="89", suffix=["cpp"])
+    answers["select"] += ["GNU G++17"]
+    answers["confirm"] += [False]
+    assert cli._replace_language(cfg, template, "89", OFFERED) == "54"
+    assert template.lang == "89" and not (tmp_path / "config").exists()
+
+
+def test_replace_a_language_declined(tmp_path, answers):
+    from cf_tool import cli
+    from cf_tool.errors import CFError
+
+    cfg, template = _template_config(tmp_path, alias="cpp", lang="89", suffix=["cpp"])
+    answers["select"] += ["Don't submit"]
+    with pytest.raises(CFError, match="Not submitted"):
+        cli._replace_language(cfg, template, "89", OFFERED)
+
+
+def test_replace_a_language_without_a_preset(tmp_path, answers):
+    from cf_tool import cli
+    from cf_tool.errors import CFError
+
+    cfg, template = _template_config(tmp_path, alias="pas", lang="3", suffix=["pas"])
+    answers["select"] += ["Free Pascal"]
+    answers["confirm"] += [False]
+    assert cli._replace_language(cfg, template, "3", OFFERED) == "4"
+    assert answers["asked"][0][1] == ["PascalABC.NET 3.8.3", "Free Pascal 3.2.2", "Don't submit"]
+    cfg, template = _template_config(tmp_path, alias="hs", lang="12", suffix=["hs"])
+    with pytest.raises(CFError, match="doesn't offer Haskell GHC 8.10.1, nor anything like it"):
+        cli._replace_language(cfg, template, "12", OFFERED)

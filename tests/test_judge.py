@@ -67,11 +67,13 @@ def test_judge_whitespace_normalization(tmp_path):
     assert judge("1", CAT, tmp_path) is True
 
 
-def test_judge_runtime_error(tmp_path):
+def test_judge_runtime_error_shows_the_output(tmp_path, capsys):
     make_samples(tmp_path, [("", "")])
-    bomb = f'{sys.executable} -c "raise SystemExit(3)"'
-    with pytest.raises(CFError, match="Runtime Error #1"):
-        judge("1", bomb, tmp_path)
+    bomb = f'{sys.executable} -c "print(42); raise SystemExit(3)"'
+    assert judge("1", bomb, tmp_path) is False
+    out = capsys.readouterr().out
+    assert "Runtime Error #1 ... exit status 3" in out
+    assert "-----Output-----" in out and "42" in out
 
 
 def test_run_test_full_flow(tmp_path, capsys):
@@ -142,11 +144,11 @@ def test_failed_sample_shows_brackets_literally(tmp_path, capsys):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
-def test_signal_is_reported(tmp_path):
+def test_signal_is_reported(tmp_path, capsys):
     make_samples(tmp_path, [("", "")])
     suicide = f'{sys.executable} -c "import os, signal; os.kill(os.getpid(), signal.SIGTERM)"'
-    with pytest.raises(CFError, match="killed by SIGTERM"):
-        judge("1", suicide, tmp_path)
+    assert judge("1", suicide, tmp_path) is False
+    assert "killed by SIGTERM" in capsys.readouterr().out
 
 
 def test_run_test_prints_a_summary(tmp_path, capsys):
@@ -159,3 +161,68 @@ def test_run_test_prints_a_summary(tmp_path, capsys):
     )
     run_test(cfg, None, tmp_path)
     assert "1/2 passed" in capsys.readouterr().out
+
+
+def test_run_test_refuses_an_interactive_problem(tmp_path):
+    from cf_tool.problem import ProblemInfo
+
+    make_samples(tmp_path, [("1\n", "1\n")])
+    ProblemInfo(interactive=True).save(tmp_path)
+    cfg = Config(template=[CodeTemplate(alias="py", suffix=["py"], script="python3 $%full%$")])
+    (tmp_path / "a.py").write_text("print(1)\n")
+    with pytest.raises(CFError, match="interactive"):
+        run_test(cfg, None, tmp_path)
+
+
+@pytest.mark.parametrize("limit,timeout", [(None, 10.0), (0.5, 2.5), (1, 3), (2, 6)])
+def test_timeout_for(limit, timeout):
+    from cf_tool.judge import timeout_for
+
+    assert timeout_for(limit) == timeout
+
+
+def test_a_hung_solution_is_killed(tmp_path, capsys, monkeypatch):
+    import cf_tool.judge as judge_module
+
+    monkeypatch.setattr(judge_module, "timeout_for", lambda limit: 0.3)
+    make_samples(tmp_path, [("", "")])
+    sleeper = f'{sys.executable} -c "import time; time.sleep(30)"'
+    assert judge("1", sleeper, tmp_path) is False
+    assert "Time limit exceeded #1 ... killed after 0.3s" in capsys.readouterr().out
+
+
+def test_limits_are_flagged(tmp_path, capsys):
+    from cf_tool.problem import ProblemInfo
+
+    make_samples(tmp_path, [("", "1\n")])
+    slow = f'{sys.executable} -c "import time; time.sleep(0.2); print(sum(range(10**6)) and 1)"'
+    assert judge("1", slow, tmp_path, ProblemInfo(time_limit=0.001, memory_limit=1)) is True
+    out = capsys.readouterr().out
+    assert "Passed #1" in out
+    assert "(over the 0.001s limit)" in out and "(over the 1 MB limit)" in out
+
+
+def test_no_flags_within_the_limits(tmp_path, capsys):
+    from cf_tool.problem import ProblemInfo
+
+    make_samples(tmp_path, [("", "1\n")])
+    assert judge(
+        "1",
+        f'{sys.executable} -c "print(1)"',
+        tmp_path,
+        ProblemInfo(time_limit=5, memory_limit=1024),
+    )
+    assert "over the" not in capsys.readouterr().out
+
+
+def test_run_test_with_what_parse_saved(tmp_path, capsys):
+    from cf_tool.problem import ProblemInfo
+
+    (tmp_path / "a.py").write_text("print(int(input()) * 2)\n")
+    make_samples(tmp_path, [("2\n", "4\n")])
+    ProblemInfo(time_limit=2.0, memory_limit=256).save(tmp_path)
+    cfg = Config(
+        template=[CodeTemplate(alias="py", suffix=["py"], script=f"{sys.executable} $%full%$")]
+    )
+    run_test(cfg, None, tmp_path, contest="4", problem="a")
+    assert "1/1 passed" in capsys.readouterr().out

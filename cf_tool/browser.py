@@ -9,6 +9,9 @@ which is why the browser uses the configured proxy too).
 
 from __future__ import annotations
 
+import os
+import shutil
+import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
@@ -78,6 +81,40 @@ def login(
         return _login_result(page, deadline)
 
     return _run(headless, proxy, action)
+
+
+_CHROME_FILES = {
+    "darwin": [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    ],
+    "win32": [
+        "%PROGRAMFILES%/Google/Chrome/Application/chrome.exe",
+        "%PROGRAMFILES(X86)%/Google/Chrome/Application/chrome.exe",
+        "%LOCALAPPDATA%/Google/Chrome/Application/chrome.exe",
+    ],
+}
+_CHROME_COMMANDS = (
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "chrome",
+)
+
+
+def find_chrome(
+    platform: str = sys.platform,
+    which: Callable[[str], "str | None"] = shutil.which,
+    is_file: Callable[[str], bool] = os.path.isfile,
+) -> str | None:
+    """Where Chrome or Chromium is installed (without starting it), or None."""
+    for candidate in _CHROME_FILES.get(platform, []):
+        where = os.path.expanduser(os.path.expandvars(candidate))
+        if is_file(where):
+            return where
+    return next((found for name in _CHROME_COMMANDS if (found := which(name))), None)
 
 
 # ------------------------------------------------------------------ helpers

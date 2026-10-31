@@ -83,6 +83,14 @@ def _clip(lines: list[str], limit: int) -> Text:
     return text
 
 
+def program_output(text: str) -> Group:
+    """What a program printed (before it crashed), its first lines only."""
+    return Group(
+        Text("-----Output-----", style="cyan"),
+        _clip(text.rstrip("\n").split("\n"), INPUT_LINES),
+    )
+
+
 def failed_sample(input_text: str, out_lines: list[str], ans_lines: list[str]) -> Group:
     """Input, then output and answer side by side with differing lines marked."""
     total = max(len(out_lines), len(ans_lines))
