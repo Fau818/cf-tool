@@ -40,6 +40,7 @@ from cf_tool.errors import CFError
 
 METADATA = ".cf-problem.json"
 TESTS = "tests"
+STATEMENT = "statement.md"
 
 
 # ┌──────────────────────────────────────────────────────────┐
@@ -264,6 +265,13 @@ def load_info(folder: Path) -> ProblemInfo | None:
 def save_info(folder: Path, info: ProblemInfo) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     (folder / METADATA).write_text(json.dumps(asdict(info), indent=2) + "\n", encoding="utf-8")
+
+
+def save_statement(folder: Path, markdown: str) -> None:
+    """Keep the problem's statement in its folder, as statement.md (cf get
+    writes it afresh each time)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / STATEMENT).write_text(markdown, encoding="utf-8", newline="")
 
 
 def find_problem_folder(start: Path) -> Path | None:

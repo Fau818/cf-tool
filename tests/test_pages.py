@@ -533,3 +533,60 @@ def test_wants_login():
 
     assert wants_login('<form id="enterForm"><input name="handleOrEmail"></form>')
     assert not wants_login(fixture("problem_4a.html"))
+
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                  Statements as Markdown                  │
+# └──────────────────────────────────────────────────────────┘
+
+
+def test_a_statement_as_markdown():
+    from cf_tool.codeforces.pages import statement_markdown
+
+    text = statement_markdown(fixture("problem_4a.html"))
+    assert text.startswith("# A. Watermelon\n\ntime limit per test: 1 second · ")
+    assert "\n## Input\n" in text and "\n## Output\n" in text and "\n## Note\n" in text
+    assert "Print `YES`, if the boys" in text  # NOTE: typewriter font
+    assert "### Input\n\n```\n8\n```" in text
+    assert "<" not in text.replace("<sub>", "").replace("<sup>", "")
+
+
+def test_tex_lists_and_links_in_markdown():
+    from cf_tool.codeforces.pages import statement_markdown
+
+    text = statement_markdown(fixture("problem_2171a.html"))
+    assert "Shizuku counts $n$ legs" in text  # NOTE: $$$n$$$ on the page
+    assert "[It is known that](https://codeforces.com/contest/1996/problem/A)" in text
+    assert "- he can have two chickens and zero cows, or\n- he can have zero" in text
+    old = statement_markdown(fixture("epsilon_808b.html"))
+    assert "2·10<sup>5</sup>" in old and "](https://espresso.codeforces.com/" in old
+    assert "### Input 3" in old  # NOTE: several examples are numbered
+
+
+def test_an_interactive_statement_keeps_its_sections():
+    from cf_tool.codeforces.pages import statement_markdown
+
+    text = statement_markdown(fixture("interactive_1520f1.html"))
+    assert "**This is an interactive problem.**" in text and "\n## Interaction\n" in text
+    assert "? 4 6" in text
+    assert statement_markdown("<html><p>no statement</p></html>") == ""
+
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                   A submission's tests                   │
+# └──────────────────────────────────────────────────────────┘
+
+
+def test_the_failed_test_of_a_submission():
+    import json
+
+    from cf_tool.codeforces.pages import has_test_details, parse_submission_details
+
+    details = parse_submission_details(json.loads(fixture("submit_source_2275f.json")))
+    assert details.verdict == "Wrong answer on test 27" and details.problem == "(F) Tea Blend"
+    failed = details.failed
+    assert failed.number == 27 and failed.verdict == "WRONG_ANSWER" and failed.cut
+    assert failed.input.startswith("3221\n78498\n2 3 5 7 ") and "\r" not in failed.output
+    assert failed.checker == "wrong answer 6th numbers differ - expected: '2', found: '4'"
+    assert has_test_details('<a class="click-to-view-tests" href="#">')
+    assert not has_test_details(fixture("problem_4a.html"))

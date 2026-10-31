@@ -61,6 +61,8 @@ def set_up(target: Target, key: str, tries: int = 1) -> Path:
         if problem.samples:
             workspace.save_samples(folder, problem.samples)
         workspace.save_info(folder, problem.info)
+        if problem.statement:
+            workspace.save_statement(folder, problem.statement)
         code = write_starter(folder, problem_target, problem.info, key)
         folders.append(folder)
         count = len(problem.samples)

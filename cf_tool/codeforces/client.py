@@ -45,6 +45,7 @@ class FetchedProblem:
     samples: list[tuple[str, str]] = field(default_factory=list)  # (input, answer)
     standard_io: bool = True
     error: str = ""  # why its samples couldn't be read; "" when they were
+    statement: str = ""  # Markdown, ending in the problem's link; "" when the page has none
 
 
 class Client:
@@ -223,6 +224,40 @@ class Client:
         self.session.last_submission = {key: last.get(key, "") for key in LAST_KEYS}
         self.gw.save()
         return submission
+
+    def details(self, target: Target, submission_id: int) -> pages.SubmissionDetails | None:
+        """A judged submission of yours with the test it failed, as Codeforces
+        shows it once the contest is over (what "Click to see test details"
+        fetches); None while it shows nothing (a running contest, someone
+        else's code)."""
+        url = target.submission_url(self.host, str(submission_id))
+        page = self.gw.get_authed(url)
+        if not pages.has_test_details(page):
+            return None
+        answer = self.gw.post(
+            f"{self.host}/data/submitSource",
+            {"submissionId": str(submission_id), "csrf_token": pages.find_csrf(page)},
+            # NOTE: as the page's own script asks for it
+            headers={"Referer": url, "X-Requested-With": "XMLHttpRequest"},
+        )
+        try:
+            data = json.loads(answer)
+        except ValueError:
+            return None
+        return pages.parse_submission_details(data) if isinstance(data, dict) else None
+
+    def find_submission(self, submission_id: int) -> Target | None:
+        """The problem a submission of yours is to, looked up among your latest
+        ones; None when it isn't there."""
+        if not self.handle:
+            return None
+        for sub in self.api(f"user.status?handle={self.handle}&from=1&count=200"):
+            if sub.get("id") == submission_id and sub.get("contestId"):
+                contest = str(sub["contestId"])
+                index = str(sub.get("problem", {}).get("index", ""))
+                kind = "gym" if len(contest) >= 6 else "contest"
+                return Target(kind, contest, index.upper())
+        return None
 
     def _newest(self, target: Target) -> int:
         """The id of your newest submission to the contest; 0 when there is none."""
@@ -423,14 +458,25 @@ def _read_problem(index: str, body: str, url: str) -> FetchedProblem:
         any_answer=header.any_answer,
         cases=pages.find_sample_cases(body),
     )
+    statement = pages.statement_markdown(body)
+    if statement:
+        statement += f"\n<{url}>\n"
     try:
         inputs, outputs = pages.find_samples(body)
     except CFError as e:
         return FetchedProblem(
-            index.upper(), info, standard_io=pages.is_standard_io(body), error=str(e)
+            index.upper(),
+            info,
+            standard_io=pages.is_standard_io(body),
+            error=str(e),
+            statement=statement,
         )
     return FetchedProblem(
-        index.upper(), info, list(zip(inputs, outputs)), pages.is_standard_io(body)
+        index.upper(),
+        info,
+        list(zip(inputs, outputs)),
+        pages.is_standard_io(body),
+        statement=statement,
     )
 
 

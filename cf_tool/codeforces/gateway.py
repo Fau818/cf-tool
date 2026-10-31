@@ -98,15 +98,16 @@ class Gateway:
         pages.require_handle(body)
         return body
 
-    def post(self, url: str, data: dict[str, str]) -> str:
+    def post(self, url: str, data: dict[str, str], headers: dict[str, str] | None = None) -> str:
         """POST a form. A challenged POST never reached Codeforces, so after
         passing the check in a browser it is safe to send it once more."""
         seen = self._solve_count
+        extra = {"headers": headers} if headers else {}
         try:
-            return self.http.post(url, data=data).text
+            return self.http.post(url, data=data, **extra).text
         except CloudflareChallengeError:
             self._solve(url, seen)
-        return self.http.post(url, data=data).text
+        return self.http.post(url, data=data, **extra).text
 
     def get_json(self, url: str) -> dict:
         return self.http.get_json(url)

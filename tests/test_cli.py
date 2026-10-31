@@ -34,6 +34,10 @@ class FakeClient:
         self.submitted: list[tuple[str, str, str]] = []
         self.logged_in = True
         self.watched: list[tuple] = []
+        # what Codeforces says of the next submission, and shows of its tests
+        self.verdict = pages.Submission(id=7, lang="PyPy 3-64", status="Accepted", end=True)
+        self.details_of: dict[int, pages.SubmissionDetails] = {}
+        self.mine: dict[int, Target] = {}  # NOTE: find_submission's answers
 
     @property
     def handle(self):
@@ -55,6 +59,13 @@ class FakeClient:
             }
         )
         self.submitted.append((filename, target.label, lang_id))
+        return self.verdict
+
+    def details(self, target, submission_id):
+        return self.details_of.get(submission_id)
+
+    def find_submission(self, submission_id):
+        return self.mine.get(submission_id)
 
     def watch(self, target, count=10, problem="", single=False):
         self.watched.append((target.label, count, problem))
@@ -159,6 +170,16 @@ def test_get_a_contest(home):
     assert "# A. Test" in code and f"# {HOST}/contest/2050/problem/A" in code
     assert (home["work"] / "2050" / "b" / "b.py").exists()
     assert "→ cd 2050/a, then cf test and cf submit there" in result.output
+
+
+def test_get_keeps_the_statement(home):
+    python_language()
+    fetched = problem("2050", "A", ("2\n", "4\n"))
+    fetched.statement = "# A. Test\n\nDouble it.\n"
+    home["client"].problems["contest 2050"] = [fetched, problem("2050", "B", ("1\n", "2\n"))]
+    assert run("get", "2050").exit_code == 0
+    assert (home["work"] / "2050" / "a" / "statement.md").read_text() == "# A. Test\n\nDouble it.\n"
+    assert not (home["work"] / "2050" / "b" / "statement.md").exists()  # NOTE: none was read
 
 
 def test_get_again_keeps_your_code(home):
@@ -521,6 +542,62 @@ def test_off_a_terminal_nothing_is_asked(fake_submit):
     assert result.exit_code == 0, result.output
     assert "submitting as PyPy 3.10" in result.output
     assert fake_submit["submitted"][-1] == ("546D.py", "546D", "70")
+
+
+def failed_on_test_3(cut: bool = False) -> pages.SubmissionDetails:
+    detail = pages.TestDetail(3, "WRONG_ANSWER", "5\n" + "..." * cut, "9\n", "10\n", "wrong 1st")
+    return pages.SubmissionDetails("Wrong answer on test 3", "(D) Test", detail)
+
+
+def test_submit_shows_and_keeps_the_failed_test(fake_submit, home):
+    folder = home["work"] / "546" / "d"
+    folder.mkdir(parents=True)
+    workspace.save_info(folder, ProblemInfo(url=f"{HOST}/contest/546/problem/D"))
+    make_code(folder, "d.py")
+    home["client"].verdict = pages.Submission(
+        id=8, lang="PyPy 3-64", status="Wrong answer on test 3"
+    )
+    home["client"].details_of[8] = failed_on_test_3()
+    result = run("submit", "546D", str(folder / "d.py"))
+    assert result.exit_code == 0, result.output  # NOTE: CP Editor takes 1 for cf failing
+    out = " ".join(result.output.split())
+    assert "── test 3 ──" in out and "checker: wrong 1st" in out
+    assert "Saved it as the test cf-3: cf test cf-3 runs it again" in out
+    assert (folder / "tests" / "cf-3.in").read_text() == "5\n"
+    assert (folder / "tests" / "cf-3.ans").read_text() == "10\n"
+
+
+def test_a_cut_failed_test_is_shown_not_kept(fake_submit, home):
+    folder = home["work"] / "546" / "d"
+    folder.mkdir(parents=True)
+    workspace.save_info(folder, ProblemInfo(url=f"{HOST}/contest/546/problem/D"))
+    make_code(folder, "d.py")
+    home["client"].verdict = pages.Submission(
+        id=8, lang="Python 3", status="Wrong answer on test 3"
+    )
+    home["client"].details_of[8] = failed_on_test_3(cut=True)
+    result = run("submit", "546D", str(folder / "d.py"))
+    assert "cut short by Codeforces" in result.output and "Saved it" not in result.output
+    assert not (folder / "tests").exists()
+
+
+def test_cpython_over_a_limit_hears_of_pypy(fake_submit, home):
+    make_code(fake_submit["dir"], "546D.py")
+    home["client"].verdict = pages.Submission(
+        id=9, lang="Python 3", status="Time limit exceeded on pretest 5"
+    )
+    result = run("submit", "546D", "546D.py")
+    assert "cf submit -l pypy" in result.output and "── test" not in result.output
+
+
+def test_status_of_one_submission(home):
+    home["client"].mine[396876324] = Target("contest", "546", "D")
+    home["client"].details_of[396876324] = failed_on_test_3()
+    result = run("status", "396876324")
+    assert result.exit_code == 0, result.output
+    assert "Wrong answer on test 3" in result.output and "── test 3 ──" in result.output
+    result = run("status", "396876325")
+    assert result.exit_code == 1 and "isn't among your latest ones" in result.output
 
 
 def test_submit_with_the_file_as_an_argument(fake_submit):

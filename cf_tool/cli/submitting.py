@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import click
 
-from cf_tool import judge, languages, ui, workspace
+from cf_tool import judge, languages, ui, views, workspace
 from cf_tool.cli.common import (
     cf_command,
     client,
@@ -154,7 +155,48 @@ def submit(args: tuple[str, ...], file_arg: str | None, language: str) -> None:
     c = client()
     ensure_login(c)
     source = workspace.read_source(path)
-    c.submit(target, source, _language_chooser(key, path, language), filename=filename)
+    submission = c.submit(target, source, _language_chooser(key, path, language), filename=filename)
+    _after_the_verdict(c, target, submission)
+
+
+_ON_TEST_RE = re.compile(r"\bon test (\d+)")  # NOTE: not "on pretest": hidden in a contest
+_SLOW_RE = re.compile(r"\b(?:Time|Memory) limit exceeded")
+
+
+def _after_the_verdict(c, target: Target, submission) -> None:
+    """What helps after a verdict other than accepted:
+    - CPython over a limit: a hint to try PyPy
+    - a failed test (once the contest is over): Codeforces' data of it"""
+    verdict, _ = submission.styled_status()
+    lang = submission.lang.lower()
+    if _SLOW_RE.search(verdict) and "python" in lang and "pypy" not in lang:
+        ui.cyan(
+            "PyPy usually runs the same Python code several times faster, and keeps lists "
+            "of numbers smaller: cf submit -l pypy"
+        )
+    if _ON_TEST_RE.search(verdict):
+        _show_failed_test(c, target, submission.id)
+
+
+def _show_failed_test(c, target: Target, submission_id: int, details=None) -> None:
+    """Codeforces' data of the test a submission failed (details, when
+    already fetched), shown, and kept among the problem's tests when it is
+    all there."""
+    if details is None:
+        try:
+            details = c.details(target, submission_id)
+        except CFError as e:
+            ui.dim(f"Cannot get the failed test's data ({e})")
+            return
+    if details is None or details.failed is None:
+        return
+    failed = details.failed
+    ui.console.print(views.failed_test(failed))
+    folder = problem_folder_of(target) if target.problem else None
+    if failed.cut or folder is None:
+        return
+    saved = workspace.add_test(folder, failed.input, failed.answer, name=f"cf-{failed.number}")
+    ui.green(f"Saved it as the test {saved.name}: cf test {saved.name} runs it again")
 
 
 def _relative(path: Path, cwd: Path) -> str:
@@ -164,18 +206,63 @@ def _relative(path: Path, cwd: Path) -> str:
         return str(path)
 
 
+def _submission_id(spec: str) -> int | None:
+    """The submission an argument names (396876324, or its URL); None for
+    anything else."""
+    last = spec.split("?")[0].rstrip("/").split("/")[-1]
+    return int(last) if re.fullmatch(r"\d{7,}", last) else None  # NOTE: a contest: 6 at most
+
+
 @click.command()
-@click.argument("specs", nargs=-1, metavar="[PROBLEM|CONTEST]", shell_complete=complete_problems)
+@click.argument(
+    "specs", nargs=-1, metavar="[PROBLEM|CONTEST|SUBMISSION]", shell_complete=complete_problems
+)
 @click.option("--all", "show_all", is_flag=True, help="All of them, not the last 10.")
 @cf_command
 def status(specs: tuple[str, ...], show_all: bool) -> None:
-    """Your submissions to the contest, refreshed until they're judged."""
+    """Your submissions to the contest, refreshed until they're judged.
+
+    \b
+    cf status             your latest submissions to the contest here
+    cf status 2050b       to problem 2050B
+    cf status 396876324   that submission, with the test it failed (by id or URL)
+    """
     if "all" in specs:  # NOTE: cf-tool 0.3's cf watch all
         show_all, specs = True, tuple(s for s in specs if s != "all")
+    submissions = [n for n in map(_submission_id, specs) if n is not None]
+    if submissions:
+        _status_of_one(specs, submissions[0])
+        return
     target = target_of(specs)
     c = client()
     ensure_login(c)
     c.watch(target, count=-1 if show_all else 10, problem=target.problem)
+
+
+def _status_of_one(specs: tuple[str, ...], submission_id: int) -> None:
+    """One submission of yours: its verdict and, once the contest is over,
+    the test it failed."""
+    c = client()
+    ensure_login(c)
+    urls = [s for s in specs if "/" in s]
+    target = target_of(urls) if urls else c.find_submission(submission_id)
+    if target is None or not target.contest:
+        raise CFError(
+            f"Submission {submission_id} isn't among your latest ones: give its URL "
+            "(https://codeforces.com/contest/<contest>/submission/<id>)"
+        )
+    details = c.details(target, submission_id)
+    if details is None:
+        raise CFError(
+            "Codeforces shows no test data for it: only for your own submissions, "
+            "once the contest is over"
+        )
+    ui.line(("› ", "cyan bold"), (str(submission_id), "bold"), (f"  {details.problem}", ""))
+    ui.line(("  ", ""), (details.verdict, "bold"))
+    index = re.match(r"\((\w+)\)", details.problem)  # NOTE: "(F) Tea Blend"
+    if not target.problem and index:
+        target = target.with_problem(index.group(1).upper())
+    _show_failed_test(c, target, submission_id, details)
 
 
 @click.command()

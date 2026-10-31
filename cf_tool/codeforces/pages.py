@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 
 from cf_tool.errors import CFError, NotLoggedInError
 
@@ -255,6 +255,156 @@ def find_problem_header(body: str) -> ProblemHeader:
         epsilon=10.0 ** -int(error.group(1) or error.group(2)) if error else None,
         any_answer=bool(_ANY_ANSWER_RE.search(f"{statement} {_note_text(body)}")),
     )
+
+
+# ------------------------------------------------- the statement as Markdown
+
+
+def statement_markdown(body: str) -> str:
+    """A problem's statement as Markdown, TeX kept ($...$, $$...$$); "" when
+    the page has none. Its parts in order:
+    - the title and the limits
+    - each section (legend, Input, Output, Interaction, Note, ...) under its title
+    - the examples as code blocks"""
+    soup = BeautifulSoup(body, "lxml")
+    statement = soup.find("div", class_="problem-statement")
+    if statement is None:
+        return ""
+    parts: list[str] = []
+    for div in statement.find_all("div", recursive=False):
+        classes = div.get("class") or []
+        if "header" in classes:
+            parts += _header_markdown(div)
+        elif "sample-tests" in classes:
+            parts += _samples_markdown(div)
+        else:
+            title = div.find("div", class_="section-title", recursive=False)
+            if title is not None:
+                parts.append(f"## {title.get_text(' ', strip=True)}")
+                title.extract()
+            parts.append(_blocks(div))
+    text = "\n\n".join(part for part in parts if part.strip())
+    # NOTE: Codeforces writes TeX between $$$ (inline) and $$$$$$ (display)
+    return text.replace("$$$$$$", "$$").replace("$$$", "$").strip() + "\n"
+
+
+def _header_markdown(header) -> list[str]:
+    """# A. Title, then "time limit per test: 1 second · ..."."""
+    title = header.find("div", class_="title")
+    facts = []
+    for name in ("time-limit", "memory-limit", "input-file", "output-file"):
+        div = header.find("div", class_=name)
+        if div is None:
+            continue
+        label = div.find("div", class_="property-title")
+        key = label.get_text(" ", strip=True) if label else ""
+        if label is not None:
+            label.extract()
+        value = div.get_text(" ", strip=True)
+        facts.append(f"{key}: {value}" if key else value)
+    return [f"# {title.get_text(' ', strip=True)}" if title else "", " · ".join(facts)]
+
+
+def _samples_markdown(div) -> list[str]:
+    """## Examples, each input and output in a code block."""
+    try:
+        inputs, outputs = find_samples(str(div))
+    except CFError:
+        return []
+    title = div.find("div", class_="section-title")
+    parts = [f"## {title.get_text(' ', strip=True) if title else 'Examples'}"]
+    for i, (sample_in, sample_out) in enumerate(zip(inputs, outputs), start=1):
+        number = f" {i}" if len(inputs) > 1 else ""
+        parts += [
+            f"### Input{number}",
+            _fenced(sample_in),
+            f"### Output{number}",
+            _fenced(sample_out),
+        ]
+    return parts
+
+
+def _fenced(text: str) -> str:
+    return f"```\n{text.rstrip(chr(10))}\n```"
+
+
+def _blocks(node) -> str:
+    """Markdown of a statement's section: paragraphs, lists, preformatted text."""
+    blocks: list[str] = []
+    inline: list[str] = []  # NOTE: loose text between blocks makes a paragraph
+
+    def flush() -> None:
+        if "".join(inline).strip():
+            blocks.append(_clean("".join(inline)))
+        inline.clear()
+
+    for child in node.children:
+        name = getattr(child, "name", None)
+        if name in ("p", "center", "div"):
+            flush()
+            nested = child.find(["p", "ul", "ol", "pre", "div"])
+            blocks.append(_blocks(child) if nested is not None else _clean(_inline(child)))
+        elif name in ("ul", "ol"):
+            flush()
+            items = child.find_all("li", recursive=False)
+            blocks.append(
+                "\n".join(
+                    f"{f'{i}.' if name == 'ol' else '-'} {_clean(_inline(item))}"
+                    for i, item in enumerate(items, start=1)
+                )
+            )
+        elif name == "pre":
+            flush()
+            blocks.append(_fenced(child.get_text()))
+        else:
+            inline.append(_inline(child) if name else re.sub(r"\s+", " ", str(child)))
+    flush()
+    return "\n\n".join(block for block in blocks if block.strip())
+
+
+def _inline(node) -> str:
+    """Markdown of text and inline markup: bold, italics, code, links, images."""
+    parts = []
+    for child in node.children:
+        name = getattr(child, "name", None)
+        if isinstance(child, Comment):
+            continue
+        if name is None:
+            parts.append(re.sub(r"\s+", " ", str(child)))
+            continue
+        classes = " ".join(child.get("class") or [])
+        inner = _inline(child).strip()
+        if name == "br":
+            parts.append("\n")
+        elif name == "img":
+            parts.append(f"![]({_absolute(child.get('src', ''))})")
+        elif name in ("b", "strong") or "tex-font-style-bf" in classes:
+            parts.append(f"**{inner}**" if inner else "")
+        elif name in ("i", "em") or "tex-font-style-it" in classes:
+            parts.append(f"*{inner}*" if inner else "")
+        elif name in ("code", "tt") or "tex-font-style-tt" in classes:
+            parts.append(f"`{inner}`" if inner else "")
+        elif name in ("sub", "sup"):  # NOTE: old statements' math: a<sub>i</sub>, 10<sup>5</sup>
+            parts.append(f"<{name}>{inner}</{name}>")
+        elif name == "a" and child.get("href"):
+            parts.append(f"[{inner}]({_absolute(child['href'])})")
+        elif name in ("ul", "ol", "pre", "p", "div"):
+            parts.append("\n\n" + _blocks(child) + "\n\n")
+        else:
+            parts.append(_inline(child))
+    return "".join(parts)
+
+
+def _clean(text: str) -> str:
+    """Spaces collapsed, but line breaks (<br>) kept."""
+    lines = [" ".join(line.split()) for line in text.split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _absolute(url: str) -> str:
+    if url.startswith("//"):
+        return "https:" + url
+    return "https://codeforces.com" + url if url.startswith("/") else url
 
 
 def _line_cases(inner: str) -> list[int] | None:
@@ -543,6 +693,67 @@ def parse_submissions(body: str, count: int = -1) -> list[Submission]:
     if not submissions:
         raise CFError("Cannot find any submission")
     return submissions
+
+
+# ------------------------------------------------- a submission's tests
+
+
+@dataclass
+class TestDetail:
+    """A test of a judged submission, as Codeforces shows it under "Click to
+    see test details" (a long part cut to its start and "...")."""
+
+    __test__ = False  # NOTE: not a pytest test class
+
+    number: int
+    verdict: str  # WRONG_ANSWER, TIME_LIMIT_EXCEEDED, ...
+    input: str
+    output: str
+    answer: str
+    checker: str  # what the checker said
+
+    @property
+    def cut(self) -> bool:
+        """Whether Codeforces cut the input or the answer short."""
+        return self.input.endswith("...") or self.answer.endswith("...")
+
+
+@dataclass
+class SubmissionDetails:
+    verdict: str  # "Wrong answer on test 27"
+    problem: str  # "(F) Tea Blend"
+    failed: TestDetail | None  # the test it failed, if any
+
+
+def has_test_details(body: str) -> bool:
+    """Whether a submission page offers its tests' details: only your own
+    submissions do, once the contest is over."""
+    return "click-to-view-tests" in body
+
+
+def parse_submission_details(data: dict) -> SubmissionDetails:
+    """A submission's verdict and failed test from /data/submitSource's JSON
+    (per test N: input#N, output#N, answer#N, rejected#N, ...)."""
+
+    def text(key: str) -> str:
+        return str(data.get(key) or "").replace("\r\n", "\n")
+
+    failed = None
+    count = int(data["testCount"]) if str(data.get("testCount", "")).isdigit() else 0
+    for n in range(1, count + 1):
+        if text(f"rejected#{n}").lower() == "true":
+            failed = TestDetail(
+                n,
+                text(f"verdict#{n}"),
+                text(f"input#{n}"),
+                text(f"output#{n}"),
+                text(f"answer#{n}"),
+                text(f"checkerStdoutAndStderr#{n}").strip(),
+            )
+            break
+    verdict = " ".join(html_lib.unescape(_TAG_RE.sub("", text("verdict"))).split())
+    problem = " ".join(html_lib.unescape(_TAG_RE.sub("", text("problemName"))).split())
+    return SubmissionDetails(verdict, problem, failed)
 
 
 # ------------------------------------------------------------- contests (API)

@@ -1,4 +1,5 @@
-"""Rich renderables: submission table/panel, problem list, failed-sample diff.
+"""Rich renderables: submission table/panel, problem list, failed-sample diff,
+a submission's failed test.
 
 Pure functions from data to renderables — printing (and live refresh) is
 the caller's business. Every foreign string goes in as Text, never markup.
@@ -17,7 +18,7 @@ from rich.table import Table
 from rich.text import Text
 
 from cf_tool import ui
-from cf_tool.codeforces.pages import Contest, ProblemRow, Submission
+from cf_tool.codeforces.pages import Contest, ProblemRow, Submission, TestDetail
 from cf_tool.workspace import Cases
 
 HEADER = f"bold {ui.ACCENT}"
@@ -284,4 +285,22 @@ def failed_sample(
     ]
     if start or stop < total:
         parts.append(Text(f"lines {start + 1}–{stop} of {total}", style=ui.MUTED))
+    return Group(*parts)
+
+
+def failed_test(detail: TestDetail) -> Group:
+    """The test a submission failed, as Codeforces shows it: what the checker
+    said, then input, output and answer like a failed sample."""
+    cut = ", cut short by Codeforces" if detail.cut else ""
+    parts: list[RenderableType] = [Text(f"── test {detail.number}{cut} ──", style=ui.ACCENT)]
+    if detail.checker:
+        parts.append(Text.assemble(("checker: ", ui.ERROR), detail.checker))
+    parts.append(
+        failed_sample(
+            detail.input,
+            detail.output.strip().splitlines(),
+            detail.answer.strip().splitlines(),
+            same=lambda out, ans: out.split() == ans.split(),
+        )
+    )
     return Group(*parts)
