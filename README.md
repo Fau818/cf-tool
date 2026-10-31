@@ -58,7 +58,7 @@ cf submit          # submits a.cpp, then shows the verdict live
 
 ```
 cf config                      configure login, templates, host, proxy, folder names
-cf submit [-f file] [spec...]  submit code (picks the file, infers contest/problem)
+cf submit [spec...] [file]     submit code (picks the file, infers contest/problem)
 cf list [spec...]              problems of a contest with stats
 cf parse [spec...]             download samples (in1.txt / ans1.txt)
 cf gen [alias]                 generate code from a template
@@ -97,6 +97,11 @@ With the [Competitive Companion](https://github.com/jmerle/competitive-companion
 extension in your browser, run `cf listen` and click its button on a problem or
 contest page: the samples and limits land where `cf parse` would put them, and cf
 fetches nothing, so Cloudflare can't get in the way.
+
+### With CP Editor
+
+[CP Editor](https://cpeditor.org) submits through cf-tool: in its preferences, set the
+CF Tool path to the `cf` that `which cf` prints.
 
 ### Tab completion
 
@@ -198,11 +203,13 @@ first run, stored login included; `~/.cf` itself is left untouched.
 uv sync --extra dev
 uv run pytest      # offline tests; the browser and login logic run against fakes
 uv run pytest -m live   # checks the parsers against the real site (public pages only)
+uv run pytest -m toolchain   # builds every language preset's starter with your compilers
 uv run black cf_tool tests && uv run flake8 --max-line-length=100 --extend-ignore=E203,W503 cf_tool tests
 ```
 
 `tests/fixtures/` holds pages trimmed from the live site; when Codeforces changes its
-markup, refresh them and fix `cf_tool/pages.py`.
+markup, refresh them and fix `cf_tool/pages.py`. The live checks also run weekly on
+GitHub (`.github/workflows/live.yml`).
 
 ## Credits & license
 

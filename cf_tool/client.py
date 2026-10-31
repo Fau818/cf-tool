@@ -232,8 +232,8 @@ class Client:
         url = info.my_submission_url(self.host)
 
         def render(submissions: list[pages.Submission]):
-            if line:
-                return views.submission_panel(submissions[0])
+            if line:  # NOTE: unboxed for a pipe: CP Editor reads "status: ..." from it
+                return views.submission_panel(submissions[0], boxed=ui.console.is_terminal)
             return views.submission_table(submissions, problem_filter)
 
         # transient while judging; the final state is then printed in full

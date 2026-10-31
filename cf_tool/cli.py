@@ -76,7 +76,8 @@ def cf_command(f):
 
 
 @click.group()
-@click.version_option(__version__, prog_name="cf")
+# NOTE: CP Editor reads the version as the digits after a v (and the Go tool printed one)
+@click.version_option(__version__, prog_name="cf", message="cf-tool v%(version)s")
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """Codeforces Tool (cf). A Python port of xalanq/cf-tool.
@@ -444,14 +445,18 @@ def _problems_here() -> list[str]:
     )
 
 
-def _specifiers(*extra: str):
+def _specifiers(*extra: str, files: bool = False):
     """A Tab completer for specifiers. It offers:
     - the extra words (all, ac)
     - the problem types (contest, gym, ...)
-    - the problems this folder's code files are named for (546D)"""
-    return lambda ctx, param, incomplete: _words(
-        incomplete, [*extra, *_TYPE_WORDS, *_problems_here()]
-    )
+    - the problems this folder's code files are named for (546D)
+    - with files: file names too"""
+
+    def complete(ctx, param, incomplete: str) -> list[CompletionItem]:
+        found = _words(incomplete, [*extra, *_TYPE_WORDS, *_problems_here()])
+        return found + [CompletionItem(incomplete, type="file")] if files else found
+
+    return complete
 
 
 def _aliases(ctx, param, incomplete: str) -> list[CompletionItem]:
@@ -496,11 +501,18 @@ def completion(shell: str | None) -> None:
     type=click.Path(dir_okay=False),
     help='Path to file, e.g. "a.cpp"',
 )
-@click.argument("specifiers", nargs=-1, shell_complete=_specifiers())
+@click.argument("specifiers", nargs=-1, shell_complete=_specifiers(files=True))
 @cf_command
 def submit(file_arg: str | None, specifiers: tuple[str, ...]) -> None:
-    """Submit a solution (auto-detects file, contest and problem)."""
+    """Submit a solution (auto-detects file, contest and problem).
+
+    The code file can also be given as an argument: cf submit 546D a.cpp.
+    """
     cfg, client = _setup()
+    named, specifiers = _code_file_among(specifiers, cfg)
+    if named and file_arg:
+        raise CFError("Give the code file once: as -f or as an argument")
+    file_arg = file_arg or named
     info = _resolve(specifiers, cfg)
     filename, index = codefiles.pick(
         file_arg,
@@ -522,6 +534,18 @@ def submit(file_arg: str | None, specifiers: tuple[str, ...]) -> None:
             cfg, template, lang_id, offered
         ),
     )
+
+
+def _code_file_among(
+    specifiers: tuple[str, ...], cfg: Config
+) -> tuple[str | None, tuple[str, ...]]:
+    """(the code file among the arguments, the other arguments): an existing
+    file with a template's suffix is the file to submit, not a specifier."""
+    suffixes = {f".{suffix}" for template in cfg.template for suffix in template.suffix}
+    files = [s for s in specifiers if Path(s).suffix in suffixes and Path(s).is_file()]
+    if len(files) > 1:
+        raise CFError(f"One code file at a time, not {' and '.join(files)}")
+    return (files[0] if files else None), tuple(s for s in specifiers if s not in files)
 
 
 def _replace_language(cfg: Config, template: CodeTemplate, lang_id: str, offered: dict) -> str:

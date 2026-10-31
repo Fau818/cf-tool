@@ -76,3 +76,14 @@ def test_calendar_lines_are_folded():
     ics = views.to_ics([Contest(1, "x" * 200, 0, 60, "BEFORE")], "https://codeforces.com", 0)
     assert all(len(line) <= 75 for line in ics.split("\r\n"))
     assert ics.replace("\r\n ", "").count("x" * 200) == 1  # NOTE: unfolding restores it
+
+
+def test_submission_lines_for_a_pipe():
+    from cf_tool.pages import Submission
+
+    sub = Submission(
+        id=42, name="D - Soldier", lang="GNU G++23", status="${c-accepted}Accepted", end=True
+    )
+    text = render(views.submission_panel(sub, boxed=False))
+    assert "status: Accepted" in text and "│" not in text  # NOTE: what CP Editor looks for
+    assert "│" in render(views.submission_panel(sub))

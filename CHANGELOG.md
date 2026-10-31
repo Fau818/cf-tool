@@ -9,20 +9,24 @@
   are picked by family too.
 - **`cf doctor`** checks templates, compilers, the login and Chrome, and says how to
   fix what's wrong.
-- **`cf test`** stops a sample that runs a few times past the problem's time limit
-  (saved by `cf parse`), flags runs over the time or memory limit, shows what a
-  crashing program printed, and won't judge interactive problems.
-- **`cf test`** accepts what the statement accepts: numbers within its error, any
-  letter case (found by `cf parse`); `-e`, `-i`, `--exact` and `--checker CMD`
-  (testlib-style) override it. A failing multi-test sample names the test case that
-  differs. `cf test 2` runs one sample, `--add` types in a new one, samples without
-  an answer are run and shown, and `--accept` keeps their output.
+- **`cf test`** uses what `cf parse` now saves from the statement: it stops a sample a
+  few times past the time limit, flags runs over a limit, and accepts what the
+  statement accepts (numbers within its error, any letter case). `-e`, `-i`,
+  `--exact` and `--checker CMD` (testlib-style) change how it compares. A failing
+  multi-test sample names the test case that differs; a crashing program shows what
+  it printed; interactive problems aren't judged. `cf test 2` runs one sample,
+  `--add` types in a new one, and samples without an answer are run and shown
+  (`--accept` keeps their output).
 - **`cf stress GEN BRUTE`**: random tests until the solution and a brute force disagree;
   the first failing test becomes a sample.
 - **`cf listen`** receives problems from the Competitive Companion browser extension:
   samples without fetching a Codeforces page.
 - **`cf contests`** lists upcoming contests (`--ics` writes a calendar file); **`cf
   pick`** picks a problem you haven't solved, by rating and tags.
+- **CP Editor** can submit through cf-tool: `cf --version` prints `cf-tool v…`, `cf
+  submit 546 D a.cpp` takes the file as an argument, and the verdict comes as plain
+  `status: …` lines when the output isn't a terminal.
+- A yes/no question with no one to answer it (input from a pipe) takes its default.
 - **`cf submit`** names the language it submits as; when Codeforces no longer offers
   the template's language, it offers that family's current ones.
 - The built-in language table (used when not logged in) had wrong ids for G++23,
@@ -31,7 +35,8 @@
   `cf gen` aliases, file names, and specifiers like `546D` from the current folder.
 - Live checks against codeforces.com (`pytest -m live`, public pages only) tell when
   its markup drifts away from the parsers.
-- CI runs on current GitHub Actions (checkout v7, setup-uv v10).
+- CI runs on current GitHub Actions (checkout v7, setup-uv v10); the live checks also
+  run weekly.
 
 ## 0.3.0a1 — first public alpha (2026-10)
 

@@ -410,8 +410,8 @@ def test_complete_specifiers_from_code_files(isolated_home, tmp_path, monkeypatc
     for name in ("546D.py", "demo.py", "2171A.cpp", "notes.txt"):  # no template for .cpp
         (work / name).write_text("")
     monkeypatch.chdir(work)
-    assert _completions(["submit"], "") == ["contest", "gym", "group", "acmsguru", "546D"]
-    assert _completions(["submit"], "5") == ["546D"]
+    assert _completions(["parse"], "") == ["contest", "gym", "group", "acmsguru", "546D"]
+    assert _completions(["submit"], "5") == ["546D", "5"]  # NOTE: and files: submit takes one
     assert _completions(["watch"], "a") == ["all", "acmsguru"]
     assert _completions(["clone"], "") == ["ac"]
 
@@ -749,3 +749,42 @@ def test_cf_pick(isolated_home, monkeypatch):
     assert "https://codeforces.com/contest/4/problem/A  (one of 1 to pick from)" in result.output
     result = CliRunner().invoke(main, ["pick", "-r", "3000", "--handle", "me"])
     assert result.exit_code == 1 and "No problem you haven't solved matches" in result.output
+
+
+def test_version_as_cp_editor_reads_it():
+    import re
+
+    output = CliRunner().invoke(main, ["--version"]).output
+    version = re.search(r"(?<=v)\d+\.\d+\.\d+", output).group()  # NOTE: CP Editor's regex
+    assert version.split(".")[0] == "0"  # NOTE: so it submits with: cf submit 546 D <file>
+
+
+def test_submit_as_cp_editor_calls_it(fake_submit):
+    make_code(fake_submit["dir"], "sol.py", "other.py")
+    full_path = str(fake_submit["dir"] / "sol.py")
+    result = CliRunner().invoke(main, ["submit", "546", "D", full_path])
+    assert result.exit_code == 0, result.output
+    assert fake_submit["submitted"] == [(full_path, "546", "D")]
+    assert fake_submit["menus"] == [] and fake_submit["questions"] == []
+
+
+def test_submit_with_the_file_as_an_argument(fake_submit):
+    make_code(fake_submit["dir"], "546D.py", "demo.py")
+    result = CliRunner().invoke(main, ["submit", "demo.py", "546D"])  # NOTE: once silently ignored
+    assert result.exit_code == 0, result.output
+    assert fake_submit["submitted"] == [("demo.py", "546", "D")]
+    url = "https://codeforces.com/contest/546/problem/D"
+    result = CliRunner().invoke(main, ["submit", "-f", "demo.py", url])
+    assert result.exit_code == 0, result.output
+    assert fake_submit["submitted"][-1] == ("demo.py", "546", "D")
+    result = CliRunner().invoke(main, ["submit", "-f", "demo.py", "546D.py", "546D"])
+    assert result.exit_code == 1 and "Give the code file once" in result.output
+
+
+def test_a_question_without_anyone_to_ask_takes_the_default(monkeypatch):
+    from cf_tool import ui
+
+    monkeypatch.setattr(ui, "interactive", lambda: False)
+    monkeypatch.setattr("builtins.input", lambda: (_ for _ in ()).throw(EOFError))
+    assert ui.confirm("Submit it?", default=True) is True
+    assert ui.confirm("Submit it anyway?", default=False) is False

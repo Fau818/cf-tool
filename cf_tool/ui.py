@@ -280,11 +280,17 @@ def path(message: str, *, validate: Validator | None = None) -> str:
 
 
 def confirm(message: str, *, default: bool = False) -> bool:
-    """Yes/no prompt; an empty answer takes the default."""
+    """Yes/no prompt; an empty answer, or no input at all, takes the default."""
     if not interactive():
         cyan(message + (" (Y/n)? " if default else " (y/N)? "))
         while True:
-            text_in = scanline().strip().lower()
+            try:
+                text_in = input().strip().lower()
+            except EOFError:
+                return default  # NOTE: nobody to ask (input from a pipe, or none)
+            except KeyboardInterrupt:
+                print("\nInterrupted.")
+                sys.exit(1)
             if not text_in:
                 return default
             if text_in in ("y", "n"):

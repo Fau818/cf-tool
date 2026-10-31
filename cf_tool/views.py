@@ -48,8 +48,9 @@ def submission_table(submissions: list[Submission], problem_id: str = "") -> Tab
     return table
 
 
-def submission_panel(sub: Submission) -> Panel:
-    """Single-submission detail view (the Go tool's display after submit)."""
+def submission_panel(sub: Submission, boxed: bool = True) -> Panel | Table:
+    """Single-submission detail view (the Go tool's display after submit);
+    unboxed, its lines read "status: Accepted" for programs reading them."""
     status, style = sub.styled_status()
     grid = Table.grid(padding=(0, 1))
     grid.add_column(justify="right", style="bold cyan")
@@ -61,6 +62,8 @@ def submission_panel(sub: Submission) -> Panel:
     grid.add_row("status:", Text(status, style=style or "white"))
     grid.add_row("time:", sub.parse_time() if sub.end else "-")
     grid.add_row("memory:", sub.parse_memory() if sub.end else "-")
+    if not boxed:
+        return grid
     border = style if sub.end and style else "dim"
     return Panel(grid, box=box.ROUNDED, border_style=border, expand=False)
 

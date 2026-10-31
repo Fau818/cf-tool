@@ -115,6 +115,10 @@ cf_tool/
   target read off a file name, or a file named for another problem than the target,
   needs a confirmation (`cli._submit_target`). Keep the folder search bounded: the
   target's folders below cwd, and from inside them only the problem's own files above.
+- **CP Editor calls cf** (its src/Extensions/CFTool.cpp): it reads `v<x.y.z>` from
+  `cf --version` (keep the `v`), runs `cf submit <contest> <problem> <file>` for major
+  version 0 (`-f <file> <url>` from 1), and reads `status: <verdict>` from stdout
+  (unboxed when not a terminal). Keep all three working.
 - **questionary quirks** (`ui.select`): it paints the default as "selected" (reverse
   video) — cleared; prompt_toolkit's Meta-Enter (Esc then Enter) submits the menu's
   hidden input line as "" — Esc is bound to cancel and non-item answers count as
