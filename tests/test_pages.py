@@ -438,6 +438,50 @@ def test_statement_tolerance():
         'error does not exceed $$$10^{-9}$$$.</div><div class="sample-tests">'
     )
     assert find_problem_header(modern).epsilon == 1e-9
+
+
+def test_a_statement_that_accepts_any_answer():
+    from cf_tool.codeforces.pages import find_problem_header
+
+    assert find_problem_header(fixture("any_answer_2275a.html")).any_answer
+    for name in (
+        "problem_4a.html",
+        "anycase_2000a.html",
+        "epsilon_808b.html",
+        "interactive_1520f1.html",  # NOTE: "if you don't print anything"
+    ):
+        assert not find_problem_header(fixture(name)).any_answer, name
+
+
+@pytest.mark.parametrize(
+    "text,accepts",
+    [
+        ("If there are multiple answers, print any of them.", True),
+        ("If there are several solutions, you may output any.", True),
+        ("Print any such permutation.", True),
+        ("If there are multiple optimal answers, any of them will be accepted.", True),
+        ("Do not print any extra spaces.", False),
+        ("If you don't print anything, you get Idleness limit exceeded.", False),
+        ("You may print any letter in any case (upper or lower).", False),
+        ("Print the answer modulo 998244353.", False),
+    ],
+)
+def test_any_answer_wording(text, accepts):
+    from cf_tool.codeforces.pages import find_problem_header
+
+    page = f'<div class="problem-statement"><p>{text}</p></div><div class="sample-tests">'
+    assert find_problem_header(page).any_answer is accepts
+
+
+def test_a_note_can_say_other_answers_are_possible():
+    from cf_tool.codeforces.pages import find_problem_header
+
+    page = (
+        '<div class="problem-statement"><p>Print a permutation.</p></div>'
+        '<div class="sample-tests"></div><div class="note"><p>In the first test case, other '
+        "answers are also possible.</p></div>"
+    )
+    assert find_problem_header(page).any_answer
     # NOTE: wording after the samples (notes, the sidebar) doesn't count
     later = '<div class="problem-statement"><div class="sample-tests">in any case</div></div>'
     assert not find_problem_header(later).ignore_case

@@ -222,6 +222,7 @@ class ProblemInfo:
     interactive: bool = False
     ignore_case: bool = False  # the statement accepts answers in any letter case
     epsilon: float | None = None  # the absolute or relative error it accepts
+    any_answer: bool = False  # it accepts any right answer, the sample's being one
     cases: list[Cases | None] = field(default_factory=list)  # per sample: its lines' cases
 
     @property
@@ -253,6 +254,7 @@ def load_info(folder: Path) -> ProblemInfo | None:
             interactive=bool(data.get("interactive", False)),
             ignore_case=bool(data.get("ignore_case", False)),
             epsilon=_number(data.get("epsilon")),
+            any_answer=bool(data.get("any_answer", False)),
             cases=[(list(c[0]), list(c[1])) if c else None for c in data.get("cases", [])],
         )
     except (OSError, ValueError, TypeError, IndexError, AttributeError):

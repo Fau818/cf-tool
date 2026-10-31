@@ -4,8 +4,10 @@ answer, and report.
 Outputs are compared the way Codeforces' usual checker compares them: word
 by word, so spaces and line breaks don't matter. What the statement allows
 widens that (cf get saved it, see check_for): numbers within an error, any
-letter case. --strict compares trimmed lines instead, and a checker program
-(run as `checker input output answer`, testlib's order) decides by itself.
+letter case. When it accepts any right answer, an output unlike the
+sample's is marked as differing (?), not as wrong. --strict compares trimmed
+lines instead, and a checker program (run as `checker input output answer`,
+testlib's order) decides by itself.
 An interactive problem runs against an interactor (`interactor input
 output`), whose exit code is the verdict.
 
@@ -21,7 +23,7 @@ import os
 import re
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -33,6 +35,7 @@ from cf_tool.workspace import ProblemInfo, Test
 DEFAULT_TIMEOUT = 10.0  # seconds a test may run when the time limit is unknown
 CHECKER_TIMEOUT = 60.0  # seconds
 RESULTS_KEPT = 200  # code versions whose results are remembered
+DIFFERS = "differs"  # a verdict: unlike the sample's answer, where any right one is accepted
 
 
 def timeout_for(time_limit: float | None) -> float:
@@ -55,6 +58,7 @@ class Check:
     ignore_case: bool = False
     strict: bool = False  # trimmed lines, not words
     checker: Program | None = None  # a built checker that decides instead
+    any_answer: bool = False  # the answer is one of the right ones: another isn't wrong
 
     def describe(self) -> str:
         """What this check accepts beyond the exact words of the answer; ""
@@ -68,7 +72,11 @@ class Check:
             allowed.append(f"numbers within {self.epsilon:g}")
         if self.ignore_case:
             allowed.append("any letter case")
-        return "Accepting " + " and ".join(allowed) if allowed else ""
+        text = "Accepting " + " and ".join(allowed) if allowed else ""
+        if self.any_answer:
+            note = "Any right answer is accepted, so an output unlike the sample's is marked ?"
+            text = f"{text}. {note}" if text else note
+        return text
 
 
 def check_for(
@@ -84,10 +92,12 @@ def check_for(
     statement allows (saved by cf get) fills in the rest."""
     if checker is not None:
         return Check(checker=checker)
+    any_answer = False
     if not exact and info is not None:
         epsilon = info.epsilon if epsilon is None else epsilon
         ignore_case = ignore_case or info.ignore_case
-    return Check(epsilon=epsilon, ignore_case=ignore_case, strict=strict)
+        any_answer = info.any_answer
+    return Check(epsilon=epsilon, ignore_case=ignore_case, strict=strict, any_answer=any_answer)
 
 
 def trimmed(text: str) -> str:
@@ -202,14 +212,16 @@ def run_test(
     info: ProblemInfo | None = None,
     check: Check = Check(),
     accept: bool = False,
-) -> bool | None:
-    """Run one test and print its verdict; returns whether it passed, or None
-    when it has no answer to pass:
+) -> bool | str | None:
+    """Run one test and print its verdict; returns whether it passed, None
+    when it has no answer to pass, DIFFERS when it may well be right:
     - output that counts as the answer: passed, with time and memory
     - running past its timeout: time limit exceeded
     - printing past the output limit: output limit exceeded
     - a crash or an exit code other than 0: runtime error, with what it printed
     - no answer: its output is shown (and kept as the answer with accept)
+    - other output where any right answer is accepted: differs (?), shown
+      beside the answer
     - other output: wrong answer, with output and answer side by side"""
     timeout = timeout_for(info.time_limit if info else None)
     result = program.run(stdin=test.input, timeout=timeout)
@@ -248,7 +260,11 @@ def run_test(
         note = [(f"  {said.splitlines()[0]}", "dim")] if said else []
         _verdict("✓", "green", test, *usage, *note)
         return True
-    _verdict("✗", "red", test, *usage, ("  wrong answer", "red"))
+    differs = check.any_answer and check.checker is None
+    if differs:
+        _verdict("?", "yellow", test, *usage, ("  differs from the sample's answer", "yellow"))
+    else:
+        _verdict("✗", "red", test, *usage, ("  wrong answer", "red"))
     if said:
         ui.line(("checker: ", "red"), (said, ""))
     sample_input = test.input.read_text(encoding="utf-8", errors="replace")
@@ -268,7 +284,7 @@ def run_test(
             ),
         )
     )
-    return False
+    return DIFFERS if differs else False
 
 
 INTERACTOR_VERDICTS = {1: "wrong answer", 2: "presentation error", 3: "the interactor failed"}
@@ -333,6 +349,7 @@ class Summary:
     passed: list[str]
     failed: list[str]
     ran: list[str]  # tests without an answer
+    differs: list[str] = field(default_factory=list)  # unlike the answer, maybe right
 
 
 def run_tests(
@@ -345,30 +362,41 @@ def run_tests(
     interactor: Program | None = None,
 ) -> Summary:
     """Run the tests one by one, then print how many passed; returns which
-    passed and which didn't."""
+    passed, which didn't, and which differ where any right answer goes."""
     summary = Summary([], [], [])
     if check.describe():
         ui.line((check.describe(), "dim"))
     for test in tests:
         try:
             if interactor is not None:
-                verdict: bool | None = run_interactive(program, interactor, test, info=info)
+                verdict: bool | str | None = run_interactive(program, interactor, test, info=info)
             else:
                 verdict = run_test(program, test, info=info, check=check, accept=accept)
         except CFError as e:
             ui.red(f"{test.name}: {e}")
             verdict = False
-        {True: summary.passed, False: summary.failed, None: summary.ran}[verdict].append(test.name)
-    judged = len(summary.passed) + len(summary.failed)
+        verdicts = {
+            True: summary.passed,
+            False: summary.failed,
+            None: summary.ran,
+            DIFFERS: summary.differs,
+        }
+        verdicts[verdict].append(test.name)
+    judged = len(summary.passed) + len(summary.failed) + len(summary.differs)
     if judged:
-        text = (
-            f"All {judged} passed"
-            if not summary.failed
-            else f"{len(summary.passed)} of {judged} passed"
-        )
+        if summary.failed or summary.differs:
+            text = f"{len(summary.passed)} of {judged} passed"
+        else:
+            text = f"All {judged} passed"
+        if summary.differs:
+            # NOTE: not wrong for sure: any right answer is accepted
+            text += f", {len(summary.differs)} differ from the samples' answers (check them)"
         if summary.ran:
             text += f", {len(summary.ran)} without an answer"
-        mark = ("✗ ", "red bold") if summary.failed else ("✓ ", "green bold")
+        if summary.failed:
+            mark = ("✗ ", "red bold")
+        else:
+            mark = ("? ", "yellow bold") if summary.differs else ("✓ ", "green bold")
         ui.line(mark, (text, "bold"))
     return summary
 
@@ -396,7 +424,12 @@ def remember(source: Path, summary: Summary) -> None:
     except OSError:
         return
     results.pop(key, None)
-    results[key] = {"failed": summary.failed, "passed": summary.passed, "when": time.time()}
+    results[key] = {
+        "failed": summary.failed,
+        "passed": summary.passed,
+        "differs": summary.differs,
+        "when": time.time(),
+    }
     kept = dict(list(results.items())[-RESULTS_KEPT:])
     try:
         paths.write_atomic(path, json.dumps(kept) + "\n")

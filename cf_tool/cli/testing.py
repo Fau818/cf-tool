@@ -245,7 +245,8 @@ def test(
             solution, current, info=info, check=check, accept=accept, interactor=interactor_program
         )
         judge.remember(path, summary)
-        if summary.failed and not watch_it:
+        # NOTE: an output unlike the sample's isn't confirmed right either
+        if (summary.failed or summary.differs) and not watch_it:
             sys.exit(1)
 
     if not watch_it:
@@ -327,6 +328,11 @@ def stress(
         exact=exact,
         checker=check_program,
     )
+    if check.any_answer:
+        ui.yellow(
+            "This problem accepts any right answer, so your output and the brute force's "
+            "may differ and both be right: judge with a checker (check*.py or --checker)"
+        )
     failed = stress_module.stress(
         folder,
         *programs,

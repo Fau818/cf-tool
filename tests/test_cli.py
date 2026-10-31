@@ -244,6 +244,16 @@ def test_a_failing_test_fails_the_command(contest, monkeypatch):
     assert result.exit_code == 1 and "wrong answer" in result.output
 
 
+def test_an_output_that_only_differs_is_not_confirmed(contest, monkeypatch):
+    folder = contest["work"] / "2050" / "b"
+    info = workspace.load_info(folder)
+    info.any_answer = True
+    workspace.save_info(folder, info)
+    monkeypatch.chdir(folder)
+    result = run("test")
+    assert result.exit_code == 1 and "differs from the sample's answer" in result.output
+
+
 def test_test_another_problem_of_the_contest(contest, monkeypatch):
     monkeypatch.chdir(contest["work"] / "2050")
     assert run("test", "a").exit_code == 0

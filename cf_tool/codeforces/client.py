@@ -420,6 +420,7 @@ def _read_problem(index: str, body: str, url: str) -> FetchedProblem:
         interactive=header.interactive,
         ignore_case=header.ignore_case,
         epsilon=header.epsilon,
+        any_answer=header.any_answer,
         cases=pages.find_sample_cases(body),
     )
     try:

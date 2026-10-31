@@ -184,6 +184,17 @@ _ERROR_RE = re.compile(
     r"[^.]{0,160}?(?:10\s*(?:\^\s*\{?|\s)\s*[-−]\s*(\d+)|\b1\s*[eE]\s*[-−]\s*(\d+))",
     re.IGNORECASE,
 )
+# "If there are several answers, print any of them": the checker takes any right
+# answer, the sample's being only one (not "don't print anything", "print any letter
+# in any case")
+_ANY_ANSWER_RE = re.compile(
+    r"(?<!not )(?<!n't )(?<!never )\b(?:print|output)\s+any\b(?!\s+(?:letter|case|extra))"
+    r"|\bany\s+(?:one\s+)?of\s+them\b[^.]{0,30}\baccepted\b"
+    r"|\bother\s+(?:correct\s+|valid\s+)?answers\s+(?:are|may\s+be)\s+(?:also\s+)?"
+    r"(?:possible|accepted|correct)"
+    r"|выведите\s+любо|любой\s+из\s+них",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -194,6 +205,11 @@ class ProblemHeader:
     interactive: bool
     ignore_case: bool = False  # the statement accepts answers in any letter case
     epsilon: float | None = None  # the absolute or relative error it accepts
+    any_answer: bool = False  # it accepts any right answer, the sample's being one
+
+
+def _text(fragment: str) -> str:
+    return re.sub(r"\s+", " ", html_lib.unescape(_TAG_RE.sub(" ", fragment)))
 
 
 def _statement_text(body: str) -> str:
@@ -202,8 +218,13 @@ def _statement_text(body: str) -> str:
     if start < 0:
         return ""
     stop = body.find('class="sample-tests"', start)
-    statement = body[start : stop if stop >= 0 else len(body)]
-    return re.sub(r"\s+", " ", html_lib.unescape(_TAG_RE.sub(" ", statement)))
+    return _text(body[start : stop if stop >= 0 else len(body)])
+
+
+def _note_text(body: str) -> str:
+    """The text of the note after the samples ("other answers are possible")."""
+    start = body.find('class="note"')
+    return _text(body[start:]) if start >= 0 else ""
 
 
 def _accepts_any_case(statement: str) -> bool:
@@ -232,6 +253,7 @@ def find_problem_header(body: str) -> ProblemHeader:
         interactive=bool(_INTERACTION_RE.search(body)),
         ignore_case=_accepts_any_case(statement),
         epsilon=10.0 ** -int(error.group(1) or error.group(2)) if error else None,
+        any_answer=bool(_ANY_ANSWER_RE.search(f"{statement} {_note_text(body)}")),
     )
 
 

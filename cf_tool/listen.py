@@ -70,6 +70,7 @@ def save_problem(data: dict, root: Path) -> tuple[Path, Target, ProblemInfo, int
     )
     if known is not None:
         info.ignore_case, info.epsilon = known.ignore_case, known.epsilon
+        info.any_answer = known.any_answer
         info.interactive = info.interactive or known.interactive
         if len(known.cases) == len(tests):
             info.cases = known.cases

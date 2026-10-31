@@ -151,6 +151,19 @@ def test_the_statement_rules_are_used(tmp_path, capsys):
     assert "0 of 1 passed" in capsys.readouterr().out
 
 
+def test_another_answer_where_any_is_accepted_only_differs(tmp_path, capsys):
+    program = python(tmp_path, "print(1, 0)")
+    tests = samples(tmp_path, ("\n", "0 1\n"))
+    info = ProblemInfo(any_answer=True)
+    summary = run_tests(program, tests, info=info, check=check_for(info))
+    out = capsys.readouterr().out
+    assert summary.differs == ["1"] and summary.failed == []
+    assert "? 1" in out and "differs from the sample's answer" in out and "wrong answer" not in out
+    assert "0 of 1 passed, 1 differ from the samples' answers (check them)" in out
+    summary = run_tests(program, tests, info=info, check=check_for(info, exact=True))
+    assert summary.failed == ["1"]  # NOTE: --exact: the statement's rules don't apply
+
+
 def test_a_checker(tmp_path, capsys):
     # NOTE: accepts the answer's numbers in any order, as a real checker might
     checker = python(
