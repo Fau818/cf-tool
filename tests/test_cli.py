@@ -582,11 +582,90 @@ def test_config_opens_a_broken_file_to_fix_it(home, monkeypatch):
         Path(filename).write_text('language = "py"\n')  # NOTE: fixed in the editor
 
     monkeypatch.setattr("click.edit", edit)
+    monkeypatch.setattr(ui, "interactive", lambda: True)
+    monkeypatch.setattr(ui, "confirm", lambda message, *, default=False: True)
     result = run("config")
     assert result.exit_code == 0, result.output
     assert "isn't valid TOML" in result.output and "Saved" in result.output
     assert edited == [str(paths.config_file())]
     assert run("config", "--path").exit_code == 0
+
+
+@pytest.fixture
+def menu(home, monkeypatch):
+    """cf config's menu, answered from menu["answers"]: per question, a
+    function of its message and choices returning the value to pick."""
+    record = {"answers": [], "asked": [], "texts": []}
+
+    def select(message, choices, *, default=None, search=False):
+        options = [c for c in choices if not isinstance(c, ui.Heading)]
+        record["asked"].append((message, [label for label, _ in options], default))
+        answer = record["answers"].pop(0)
+        return answer(message, options) if callable(answer) else answer
+
+    def text(message, *, default="", validate=None, allow_empty=True):
+        return record["texts"].pop(0)
+
+    monkeypatch.setattr(ui, "interactive", lambda: True)
+    monkeypatch.setattr(ui, "select", select)
+    monkeypatch.setattr(ui, "text", text)
+    return record
+
+
+def by_label(part):
+    """An answer: the choice whose label has part in it."""
+    return lambda message, options: next(value for label, value in options if part in label)
+
+
+def test_config_menu_first_choices_are_recommended(menu):
+    settings_file('language = "py"\n')
+    menu["answers"] = [by_label("submitted as"), by_label("Python 3.13"), "done"]
+    assert run("config").exit_code == 0
+    rows = menu["asked"][0][1]
+    assert any("Python submitted as" in row and "(recommended)" in row for row in rows)
+    message, labels, default = menu["asked"][1]
+    assert labels[0] == "PyPy 3.10 (7.3.15, 64bit) (recommended)" and default == ""
+    assert 'submit = "31"' in paths.config_file().read_text()  # NOTE: saved by its id
+    menu["answers"] = [by_label("submitted as"), by_label("recommended"), "done"]
+    assert run("config").exit_code == 0
+    assert "submit" not in paths.config_file().read_text().split("[py]")[-1]
+
+
+def test_config_menu_build_and_run(menu):
+    python_language()
+    menu["answers"] = [by_label("build and run"), "flags", "done"]
+    menu["texts"] = ["-X dev"]
+    assert run("config").exit_code == 0
+    text = paths.config_file().read_text()
+    assert 'flags = "-X dev"' in text and "run =" not in text  # NOTE: python_language's run went
+    menu["answers"] = [by_label("build and run"), "own", "done"]
+    menu["texts"] = ["", "pypy3 {src}"]
+    assert run("config").exit_code == 0
+    conf = common.settings().language_settings("py")
+    assert (conf.build, conf.run, conf.flags) == ((), ("pypy3", "{src}"), ())
+    menu["answers"] = [by_label("build and run"), "", "done"]
+    assert run("config").exit_code == 0
+    conf = common.settings().language_settings("py")
+    assert (conf.build, conf.run, conf.flags) == (None, None, ())
+
+
+def test_config_menu_starter_and_proxy(menu):
+    settings_file('language = "cpp"\n')
+    menu["answers"] = [by_label("starter code"), "copy", by_label("Proxy"), "done"]
+    menu["texts"] = ["socks5://127.0.0.1:1080"]
+    assert run("config").exit_code == 0
+    copied = paths.templates_dir() / "template.cpp"
+    assert "bits/stdc++.h" in copied.read_text()
+    assert common.settings().proxy == "socks5://127.0.0.1:1080"
+    menu["answers"] = [by_label("Proxy"), by_label("Language"), "go", "done"]
+    menu["texts"] = [""]
+    assert run("config").exit_code == 0
+    assert common.settings().proxy == "" and common.settings().language == "go"
+
+
+def test_config_menu_needs_a_terminal(home):
+    result = run("config")
+    assert result.exit_code == 0 and "needs a terminal" in result.output
 
 
 def test_contests(home, monkeypatch):

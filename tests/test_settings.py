@@ -275,3 +275,20 @@ def test_custom_folder_names_are_mentioned(config_dir):
     old = dict(OLD, folder_name={"root": "codeforces", "contest": "contest"})
     write(config_dir / "config", json.dumps(old))
     assert any("your folder names" in note for note in migrate())
+
+
+def test_remove_goes_back_to_the_default(config_dir):
+    path = write(
+        config_dir / "config.toml",
+        '# mine\nproxy = "http://x:1"\n\n[cpp]\n# why\nsubmit = "54"\nflags = "-DLOCAL"\n'
+        '[py]\nsubmit = "70"\n',
+    )
+    settings = Settings.load()
+    settings.remove("submit", table="cpp")
+    settings.remove("submit", table="py")  # NOTE: [py] is empty then: it goes
+    settings.remove("proxy")
+    settings.remove("compiler", table="rs")  # NOTE: nothing there: nothing happens
+    text = path.read_text()
+    assert "# mine" in text and "[py]" not in text and 'flags = "-DLOCAL"' in text
+    assert settings.proxy == "" and settings.language_settings("cpp").submit == ""
+    assert Settings.load().language_settings("cpp").flags == ("-DLOCAL",)

@@ -52,8 +52,10 @@ a suffix, stale language ids, folders too deep.
 
 - **Layout**: one folder per problem: `2050/a/` holds `a.cpp`, `tests/1.in`, `tests/1.ans`
   and `.cf-problem.json`.
-- **Settings**: `~/.config/cf/config.toml` first, commented, every key optional; `cf config`
-  opens it in the editor; plus commands like `cf login` and `cf langs`.
+- **Settings**: `~/.config/cf/config.toml`, commented, every key optional. Revised the same
+  night: `cf config` is a menu whose lists start with the recommended choice (Enter keeps
+  it): compiler, submit language by name, build/run (recommended, + flags, or your own),
+  starter code, proxy, login; `cf config --edit` opens the file.
 - **Commands**: new names; the old names keep working as hidden aliases.
 - **Also in 0.4.0**: `cf test --watch`, interactive problems (`--interactor`), publishing to
   PyPI.

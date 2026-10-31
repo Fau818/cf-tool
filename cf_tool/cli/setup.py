@@ -12,41 +12,42 @@ from rich.table import Table
 from rich.text import Text
 
 from cf_tool import __version__, languages, paths, ui
-from cf_tool.cli.common import cf_command, client, reset, settings, short, starter_language
+from cf_tool.cli import configure
+from cf_tool.cli.common import cf_command, client, settings, short
 from cf_tool.errors import CFError
-from cf_tool.settings import Settings
 
 REPOSITORY = "Fau818/cf-tool"
 
 
 @click.command()
-@click.option("--path", "path_only", is_flag=True, help="Print where the file is, and stop.")
+@click.option("--edit", "edit_it", is_flag=True, help="Open config.toml in your editor instead.")
+@click.option("--path", "path_only", is_flag=True, help="Print where config.toml is, and stop.")
 @cf_command
-def config(path_only: bool) -> None:
-    """Open the settings (config.toml) in your editor; every setting in it
-    is explained there, and all of them are optional."""
+def config(edit_it: bool, path_only: bool) -> None:
+    """Change the settings, picking from lists: the language for new
+    problems, and for each language what it is submitted as, its compiler and
+    its starter code; the proxy; the login. They are saved in config.toml,
+    which --edit opens (every setting is explained in it)."""
     path = paths.config_file()
     if path_only:
         click.echo(str(path))  # NOTE: never wrapped, for scripts
         return
+    if edit_it:
+        configure.edit_file()
+        return
     try:
-        current = settings()
-    except CFError as e:  # NOTE: a broken file is opened all the same, to fix it
-        ui.yellow(str(e))
-        current = None
-    if current is not None and not path.exists():
-        if not current.language and ui.interactive():
-            starter_language()
-        current.write_default()
-    click.edit(filename=str(path))
-    reset()
-    try:
-        reloaded = Settings.load(path)
+        settings()
     except CFError as e:
-        raise CFError(f"{e}\nRun cf config again to fix it") from e
-    for warning in reloaded.warnings:
-        ui.yellow(warning)
-    ui.green(f"Saved {short(path)}")
+        ui.red(str(e))
+        if ui.interactive() and ui.confirm("Open it in your editor to fix it?", default=True):
+            configure.edit_file()
+        return
+    if not ui.interactive():
+        ui.plain(
+            f"cf config's menu needs a terminal. The settings are in {path} (cf config --edit)."
+        )
+        return
+    configure.menu()
 
 
 @click.command()

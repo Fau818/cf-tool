@@ -126,6 +126,36 @@ class Settings:
     def update(self, key: str, value: Any, table: str | None = None) -> None:
         """Set one setting (in a language's table when given) and save
         config.toml, keeping everything else in it as it was."""
+
+        def edit(doc) -> None:
+            if table is None:
+                doc[key] = value
+                return
+            if table not in doc:
+                doc[table] = tomlkit.table()
+            doc[table][key] = value
+
+        language = value if (key, table) == ("language", None) else self.language
+        self._change(edit, language, key == "language" and table is None and value)
+
+    def remove(self, key: str, table: str | None = None) -> None:
+        """Take a setting out of config.toml (back to its default), keeping
+        everything else; a language's table left empty goes too."""
+
+        def edit(doc) -> None:
+            holder = doc if table is None else doc.get(table)
+            if holder is not None and key in holder:
+                del holder[key]
+            if table is not None and table in doc and not len(doc[table]):
+                del doc[table]
+
+        if not self.file.exists():
+            return
+        self._change(edit, self.language)
+
+    def _change(self, edit, language: str, new_language: Any = None) -> None:
+        """Apply edit to config.toml's document and save it, then read the
+        settings back into self. A missing file starts as the explained one."""
         path = self.file
         try:
             text = path.read_text(encoding="utf-8")
@@ -134,20 +164,14 @@ class Settings:
         except OSError as e:
             raise CFError(f"Cannot read {path}: {e.strerror or e}") from e
         if not text:
-            language = value if (key, table) == ("language", None) else self.language
             text = default_text(language)
-        elif (key, table) == ("language", None) and LANGUAGE_UNSET in text:
-            text = text.replace(LANGUAGE_UNSET, f'language = "{value}"')  # NOTE: in its place
+        elif new_language and LANGUAGE_UNSET in text:
+            text = text.replace(LANGUAGE_UNSET, f'language = "{new_language}"')  # NOTE: in place
         try:
             doc = tomlkit.parse(text)
         except TOMLKitError as e:
             raise CFError(f"{path} isn't valid TOML: {e}") from e
-        if table is None:
-            doc[key] = value
-        else:
-            if table not in doc:
-                doc[table] = tomlkit.table()
-            doc[table][key] = value  # type: ignore[index]
+        edit(doc)
         new_text = tomlkit.dumps(doc)
         updated = _from_data(tomlkit.parse(new_text).unwrap(), path)
         paths.write_atomic(path, new_text)

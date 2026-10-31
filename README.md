@@ -81,7 +81,7 @@ contest's folder, a problem's letter is enough: `cf test b`, `cf submit b`.
 | `cf pull [problem]` / `cf clone [handle]` | download the code of your (or anyone's) submissions |
 | `cf login` / `cf logout` | log in to Codeforces, or forget the login |
 | `cf langs` | how each language is built, run and submitted here |
-| `cf config` | open the settings in your editor |
+| `cf config` | change the settings from menus (`--edit` opens the file) |
 | `cf doctor` | check the setup and say how to fix what's wrong |
 | `cf completion` | the Tab-completion script for your shell |
 
@@ -122,33 +122,44 @@ output, and its exit code is the verdict (0 accepted, 1 wrong answer), as with t
 
 ## Settings
 
-Everything works without settings. To change something, `cf config` opens
-`~/.config/cf/config.toml`, where every setting is explained:
+Everything works without settings: cf finds your compiler, picks the newest Codeforces
+language, and starts you from a built-in template. To change something, run `cf config`:
 
-```toml
-language = "cpp"          # what cf get writes starter code in
-
-[cpp]                     # one table per language, named by its file extension
-compiler = "g++-15"       # default: the best one found here, GCC first
-flags = "-DLOCAL"         # added to the default flags
-submit = "G++20"          # part of a Codeforces language's name, or its id
-template = "~/cp/template.cpp"
+```
+? Settings (saved in ~/.config/cf/config.toml); Enter changes one:
+ » 1) Language                C++
+   2) C++ compiler            GCC 14 (g++-14) (recommended)
+   3) C++ submitted as        GNU G++23 14.2 (64 bit, msys2) (recommended)
+   4) C++ build and run       recommended
+   5) C++ starter code        built-in (recommended)
+   6) Another language's settings...
+   7) Proxy                   none
+   8) Login                   tourist
+   9) Edit config.toml in your editor
+   0) Done
 ```
 
-- **Compilers.** cf finds them by itself, GCC first. C++ is compiled with the standard of
-  the Codeforces language it is submitted as (or the newest your compiler knows), so code
-  that compiles here compiles there. `cf langs` shows what each language uses.
-- **Submit language.** By default the newest one of the family (G++23 for C++, PyPy for
-  Python). `cf langs --all` lists every language Codeforces offers, with its id.
-- **Starter code.** Your own goes in `~/.config/cf/templates/template.cpp` (or set
-  `template`). `cf new brute` starts from `templates/brute.cpp` when you have one. In
-  starter code, `{{name}}`, `{{url}}`, `{{problem}}`, `{{handle}}`, `{{date}}` and
-  `{{time}}` are filled in.
-- **Full control.** `build = "..."` and `run = "..."` replace the commands for a language,
-  with `{src}` (the code file) and `{exe}` (the program built from it). A table for an
-  extension cf doesn't know (`[hs]`) adds a language.
-- **Elsewhere.** `root = "~/codeforces"` makes `cf get` put contests there; `proxy` and
-  `host` are there too.
+Each choice opens a list whose first item is the recommended one, already selected, so Enter
+keeps it.
+
+- **Compiler.** The best one found here comes first (GCC before clang); the others found,
+  or any program, are there too. C++ is compiled with the standard of the Codeforces
+  language it is submitted as (or the newest your compiler knows), so code that compiles
+  here compiles there.
+- **Submitted as.** Codeforces' languages of that family by name, the newest first.
+- **Build and run.** The recommended commands are shown; you can add flags of yours (like
+  `-DLOCAL`) or write your own, with `{src}` for your code file and `{exe}` for the program
+  built from it.
+- **Starter code.** The built-in one, a file of yours, or the built-in one copied to
+  `~/.config/cf/templates/` for you to change. `cf new brute` starts from
+  `templates/brute.cpp` when you have one. In starter code, `{{name}}`, `{{url}}`,
+  `{{problem}}`, `{{handle}}`, `{{date}}` and `{{time}}` are filled in.
+
+Everything is saved in `~/.config/cf/config.toml`, where every setting is explained;
+`cf config --edit` opens it in your editor. There you can also set `root =
+"~/codeforces"` (where `cf get` puts contests), `host`, or add a language cf doesn't know,
+as a table with `build`, `run` and `submit` (`[hs]`). `cf langs` shows what each language
+uses.
 
 ## Logging in
 

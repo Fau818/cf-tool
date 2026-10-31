@@ -40,7 +40,9 @@ cf_tool/
 ├── cli/            # Click commands, grouped: problems (get race new listen pick
 │                   #   problems contests open), testing (test stress), submitting
 │                   #   (submit status pull clone), account (login logout), setup
-│                   #   (config langs doctor upgrade), completion. Bodies stay thin;
+│                   #   (config langs doctor upgrade), configure (cf config's menu:
+│                   #   the first choice of each list is the recommended one,
+│                   #   pre-selected), completion. Bodies stay thin;
 │                   #   common.py: cf_command (CFError -> a red line; CF_DEBUG=1 adds the
 │                   #   traceback), settings()/client() loaded once, finding the problem,
 │                   #   the first-run language question, logging in on the spot.

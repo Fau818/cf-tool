@@ -5,9 +5,10 @@
 A new cf-tool: it no longer follows the Go cf-tool's model, and needs no setup.
 
 - **No templates, no scripts.** The file extension picks the language, and cf finds the
-  compiler (GCC first) when it needs one. Settings are optional, in a commented
-  `~/.config/cf/config.toml` that `cf config` opens: the compiler, extra flags, the
-  Codeforces language, your starter file, or whole build and run commands.
+  compiler (GCC first) when it needs one. Settings are optional: `cf config` changes them
+  from menus whose first choice is the recommended one (the compiler, the Codeforces
+  language by name, flags or whole build and run commands, your starter code), saved in a
+  commented `~/.config/cf/config.toml` that `cf config --edit` opens.
 - **Local matches the judge.** C++ is compiled with the standard of the language it is
   submitted as (G++20 → `-std=c++20`; with an older compiler, the newest one it knows),
   with Codeforces' 256 MB stack. Outputs are compared word by word, like Codeforces' usual
