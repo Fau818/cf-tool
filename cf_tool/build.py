@@ -2,10 +2,11 @@
 changed is not compiled again.
 
 Builds live in $XDG_CACHE_HOME/cf/build/<key>/, never next to the code. The
-key covers the source, the build and run commands and the compiler's version
-text, so a change to any of them builds afresh; a C/C++ source with a local
-`#include "..."` is rebuilt every time (the header may have changed). Builds
-unused for a week are removed.
+key covers the source, the build and run commands, the compiler's version
+text and the files in the build's include folders (-I), so a change to any of
+them builds afresh; a C/C++ source with a local `#include "..."` is rebuilt
+every time (the header may have changed). Builds unused for a week are
+removed.
 """
 
 from __future__ import annotations
@@ -58,7 +59,7 @@ class Program:
     def name(self) -> str:
         return self.source.name
 
-    def _key(self, code: bytes) -> str:
+    def _key(self, code: bytes, headers: str) -> str:
         digest = hashlib.sha256()
         for part in (
             self.setup.fingerprint,
@@ -66,6 +67,7 @@ class Program:
             "\0".join(self.setup.run),
             sys.platform,
             str(self.source),
+            headers,
         ):
             digest.update(part.encode() + b"\1")
         digest.update(code)
@@ -87,9 +89,11 @@ class Program:
             code = self.source.read_bytes()
         except OSError as e:
             raise CFError(f"Cannot read {self.source}: {e.strerror or e}") from e
-        folder = paths.CACHE_DIR / "build" / self._key(code)
+        headers = _headers_stamp(self.setup.build, self.source.parent)
+        always = headers is None or bool(_LOCAL_INCLUDE_RE.search(code))
+        folder = paths.CACHE_DIR / "build" / self._key(code, headers or "")
         self._folder = folder
-        if (folder / _MARK).is_file() and not _LOCAL_INCLUDE_RE.search(code):
+        if (folder / _MARK).is_file() and not always:
             with contextlib.suppress(OSError):
                 os.utime(folder / _MARK)  # NOTE: still in use, so not pruned
             return Built(cached=True, seconds=0.0, messages="")
@@ -108,11 +112,14 @@ class Program:
                 raise BuildFailed(f"Building {self.name} took over {BUILD_TIMEOUT:g}s", messages)
             raise BuildFailed(f"{self.name} doesn't compile ({result.reason()})", messages)
         (work / _MARK).write_text("", encoding="utf-8")
-        shutil.rmtree(folder, ignore_errors=True)
-        try:
-            os.replace(work, folder)
-        except OSError:  # NOTE: another cf built the same just now
-            shutil.rmtree(work, ignore_errors=True)
+        if (folder / _MARK).is_file() and not always:
+            shutil.rmtree(work, ignore_errors=True)  # NOTE: another cf built the same meanwhile
+        else:
+            shutil.rmtree(folder, ignore_errors=True)  # NOTE: a half-built or outdated one
+            try:
+                os.replace(work, folder)
+            except OSError:  # NOTE: another cf put its build there just now
+                shutil.rmtree(work, ignore_errors=True)
         return Built(cached=False, seconds=seconds, messages=messages)
 
     def argv(self) -> list[str]:
@@ -126,6 +133,44 @@ class Program:
         return process.run(
             self.argv(), cwd=self.source.parent, big_stack=self.setup.big_stack, **options
         )
+
+
+_INCLUDE_FLAGS = ("-isystem", "-iquote", "-idirafter", "-I")
+MAX_HEADERS = 5000  # files under -I folders looked at; more: built every time
+
+
+def _headers_stamp(build: tuple[str, ...], base: Path) -> str | None:
+    """What the build's include folders (-I and the like, other than cf-tool's
+    own) hold, as one text that changes whenever a file there does; None when
+    they hold too many files to look at."""
+    from cf_tool.languages import shim_folder
+
+    folders = []
+    for i, word in enumerate(build):
+        for flag in _INCLUDE_FLAGS:
+            if word == flag and i + 1 < len(build):
+                folders.append(build[i + 1])
+            elif word.startswith(flag) and len(word) > len(flag):
+                folders.append(word[len(flag) :])
+            else:
+                continue
+            break
+    own = shim_folder()
+    stamp = []
+    for name in folders:
+        folder = (base / Path(name).expanduser()).resolve()
+        if "{" in name or folder == own.resolve() or not folder.is_dir():
+            continue
+        for root, _, files in os.walk(folder):
+            for file in files:
+                try:
+                    info = os.stat(os.path.join(root, file))
+                except OSError:
+                    continue
+                stamp.append(f"{root}/{file}:{info.st_mtime_ns}:{info.st_size}")
+                if len(stamp) > MAX_HEADERS:
+                    return None
+    return "\n".join(sorted(stamp))
 
 
 def fill(words: tuple[str, ...] | list[str], values: dict[str, str]) -> list[str]:

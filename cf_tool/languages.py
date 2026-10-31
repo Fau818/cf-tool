@@ -243,13 +243,32 @@ def _succeeds(argv: list[str]) -> bool:
         return False
 
 
-_banners: dict[str, str] | None = None
+_banners: dict[str, str] | None = None  # what tools said, kept in STATE_DIR/tools.json
+
+
+def _tool_cache() -> dict[str, str]:
+    global _banners
+    if _banners is None:
+        try:
+            loaded = json.loads((paths.STATE_DIR / "tools.json").read_text(encoding="utf-8"))
+            _banners = loaded if isinstance(loaded, dict) else {}
+        except (OSError, ValueError):
+            _banners = {}
+    return _banners
+
+
+def _remember(key: str, value: str) -> None:
+    cache = _tool_cache()
+    cache[key] = value
+    try:
+        paths.write_atomic(paths.STATE_DIR / "tools.json", json.dumps(cache, indent=1) + "\n")
+    except OSError:
+        pass
 
 
 def _cached_version(program: str, flag: str) -> str:
     """_version_text of the program on PATH, remembered across runs while the
     program file stays the same (macOS's /usr/bin stand-ins are always asked)."""
-    global _banners
     where = shutil.which(program)
     if where is None:
         return ""
@@ -260,32 +279,48 @@ def _cached_version(program: str, flag: str) -> str:
     if sys.platform == "darwin" and Path(where).parent == Path("/usr/bin"):
         return _version_text(where, flag)  # NOTE: they forward to whichever tools are selected
     key = f"{where}|{flag}|{stat.st_mtime_ns}|{stat.st_size}"
-    cache_file = paths.STATE_DIR / "tools.json"
-    if _banners is None:
-        try:
-            loaded = json.loads(cache_file.read_text(encoding="utf-8"))
-            _banners = loaded if isinstance(loaded, dict) else {}
-        except (OSError, ValueError):
-            _banners = {}
-    if key in _banners:
-        return _banners[key]
+    cache = _tool_cache()
+    if key in cache:
+        return cache[key]
     banner = _version_text(where, flag)
     if banner:  # NOTE: a failure isn't remembered: the tool may be installed later
-        _banners[key] = banner
-        try:
-            paths.write_atomic(cache_file, json.dumps(_banners, indent=1) + "\n")
-        except OSError:
-            pass
+        _remember(key, banner)
     return banner
+
+
+def _accepts_std(program: str, std: str) -> bool:
+    """Whether the C++ compiler program takes -std=std; asked once per
+    compiler version (by compiling nothing with it)."""
+    where = shutil.which(program)
+    banner = _cached_version(program, "--version") if where else ""
+    if not where or not banner:
+        return False
+    key = f"std|{banner}|{std}"
+    cache = _tool_cache()
+    if key in cache:
+        return cache[key] == "yes"
+    try:
+        done = subprocess.run(
+            [where, f"-std={std}", "-x", "c++", "-fsyntax-only", "-"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    _remember(key, "yes" if done.returncode == 0 else "no")
+    return done.returncode == 0
 
 
 @dataclass
 class Machine:
-    """What detection looks at: commands on PATH, their version text, the OS."""
+    """What detection looks at: commands on PATH, their version text, the OS,
+    and which -std a C++ compiler takes (None: judged by its version)."""
 
     which: Callable[[str], "str | None"] = shutil.which
     version: Callable[[str, str], str] = _cached_version
     platform: str = sys.platform
+    accepts: "Callable[[str, str], bool] | None" = _accepts_std
 
 
 def _numbers(text: str) -> tuple[int, ...]:
@@ -394,6 +429,7 @@ class Context:
     submit_name: str = ""  # the Codeforces language it is submitted as ("" unknown)
     flags: tuple[str, ...] = ()  # the user's extra flags
     source: Path | None = None  # the code file, when there is one (Java's class name)
+    accepts: "Callable[[str, str], bool] | None" = None  # see Machine.accepts
 
 
 # (build command, or None when nothing is built; run command). Words may hold
@@ -411,28 +447,60 @@ def _stack_flags(platform: str) -> list[str]:
     return []
 
 
-def cpp_standard(submit_name: str, tool: Tool | None = None) -> str:
+# each C++ standard's spellings for -std, the current one first
+_STD_SPELLINGS = {
+    26: ("c++26", "c++2c"),
+    23: ("c++23", "c++2b"),
+    20: ("c++20", "c++2a"),
+    17: ("c++17", "c++1z"),
+    14: ("c++14", "c++1y"),
+    11: ("c++11", "c++0x"),
+}
+# the first major version of each compiler that knows each spelling
+_FIRST_KNOWN = {
+    "gcc": {"c++23": 11, "c++2b": 11, "c++20": 10, "c++2a": 8, "c++17": 5, "c++1z": 5},
+    "clang": {"c++23": 17, "c++2b": 12, "c++20": 10, "c++2a": 5, "c++17": 5, "c++1z": 3},
+    "apple clang": {"c++23": 16, "c++2b": 13, "c++20": 12, "c++2a": 10, "c++17": 10, "c++1z": 6},
+}
+
+
+def cpp_standard(
+    submit_name: str,
+    tool: Tool | None = None,
+    accepts: Callable[[str, str], bool] | None = None,
+) -> str:
     """The -std value for C++ submitted as submit_name ("GNU G++20 13.2" ->
-    "c++20"; unknown -> c++23), in a spelling tool understands (older
-    compilers call C++23 c++2b and C++20 c++2a)."""
+    c++20; unknown -> C++23): the newest spelling of that standard, or of an
+    older one, that tool takes. In order:
+    - asking the compiler (accepts), when it can be asked
+    - by the compiler's version, when it is known
+    - the standard's own name"""
     match = re.search(r"\+\+\s*(\d{2})\b", submit_name)
     year = int(match.group(1)) if match else 23
-    if tool is None or not tool.version:
-        return f"c++{year}"
-    major = tool.version[0]
-    # the first major version spelling each standard by its year
-    first = {
-        "gcc": {23: 11, 20: 10},
-        "clang": {23: 17, 20: 10},
-        "apple clang": {23: 16, 20: 12},
-    }.get(tool.kind, {})
-    if year in first and major < first[year]:
-        return {23: "c++2b", 20: "c++2a"}[year]
-    return f"c++{year}"
+    year = max((y for y in _STD_SPELLINGS if y <= year), default=11)
+    spellings = [
+        s for y in sorted(_STD_SPELLINGS, reverse=True) if y <= year for s in _STD_SPELLINGS[y]
+    ]
+    if tool is not None and accepts is not None:
+        for spelling in spellings:
+            if accepts(tool.program, spelling):
+                return spelling
+    first = _FIRST_KNOWN.get(tool.kind, {}) if tool is not None and tool.version else {}
+    if first:
+        major = tool.version[0]  # type: ignore[union-attr]
+        for spelling in spellings:
+            if spelling in first and major >= first[spelling]:
+                return spelling
+    return spellings[0]
 
 
 def _cpp_commands(tool: Tool, ctx: Context) -> Commands:
-    build = [tool.program, f"-std={cpp_standard(ctx.submit_name, tool)}", "-O2", "-Wall"]
+    build = [
+        tool.program,
+        f"-std={cpp_standard(ctx.submit_name, tool, ctx.accepts)}",
+        "-O2",
+        "-Wall",
+    ]
     build += _stack_flags(ctx.platform)
     if "clang" in tool.kind:
         build.append(f"-I{shim_folder()}")  # NOTE: clang's own library has no bits/stdc++.h
@@ -783,22 +851,26 @@ def _normal(text: str) -> str:
 def choose_submit(key: str, spec: str, offered: Mapping[str, str]) -> tuple[str, str] | None:
     """The (id, name) to submit a language as, among offered:
     - spec empty: the best of its family
-    - spec an id: that language
-    - otherwise: the best language whose name contains spec ("G++20"),
-      first within the family, then among all
-    None when nothing offered fits."""
+    - spec an id of its family (any id, for a language from config.toml)
+    - otherwise: the best language of the family whose name contains spec
+      ("G++20"; a number like 20 too), also among the ones never picked by
+      themselves (Clang++20 Diagnostics)
+    Never another family's language: None when nothing offered fits."""
     options = family(key, offered)
     if not spec:
         return options[0] if options else None
-    if spec.isdigit():
-        return (spec, offered[spec]) if spec in offered else None
+    custom = key not in LANGUAGES  # NOTE: from config.toml: its family is unknown
+    if spec.isdigit() and spec in offered and (custom or ext_of(offered[spec]) == key):
+        return spec, offered[spec]
     wanted = _normal(spec)
     matches = [item for item in options if wanted in _normal(item[1])]
-    if not matches:
-        matches = sorted(
-            (item for item in offered.items() if wanted in _normal(item[1])),
-            key=lambda item: newest_first_key(item[1]),
-        )
+    if not matches and not spec.isdigit():
+        others = [
+            item
+            for item in offered.items()
+            if (custom or ext_of(item[1]) == key) and wanted in _normal(item[1])
+        ]
+        matches = sorted(others, key=lambda item: newest_first_key(item[1]))
     return matches[0] if matches else None
 
 
@@ -872,7 +944,7 @@ def setup(
         tool = tools[0]
         if key == "py" and "pypy" in submit_name.lower():
             tool = next((t for t in tools if t.kind == "pypy"), tool)  # NOTE: test as judged
-    ctx = Context(machine.platform, submit_name, conf.flags, source)
+    ctx = Context(machine.platform, submit_name, conf.flags, source, machine.accepts)
     build, run = language.commands(tool, ctx)
     if "clang" in tool.kind and key == "cpp" and conf.build is None:
         write_shim()

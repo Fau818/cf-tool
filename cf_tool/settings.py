@@ -42,7 +42,7 @@ DEFAULT_TEXT = """\
 # cf-tool settings. Every line is optional: delete one to get its default back.
 
 # The language `cf get` writes starter code in: cpp, c, py, java, kt, rs or go.
-language = "{language}"
+{language_line}
 
 # Where `cf get` puts contests (default: the folder you run it in).
 # root = "~/codeforces"
@@ -61,6 +61,16 @@ language = "{language}"
 # build = "g++ -std=c++20 -O2 {{src}} -o {{exe}}"   # replaces the whole build command
 # run = "{{exe}}"                   # replaces the run command
 """
+
+
+def default_text(language: str) -> str:
+    """config.toml as cf-tool first writes it: every setting explained, the
+    language set when known (else cf get asks for it)."""
+    line = f'language = "{language}"' if language else LANGUAGE_UNSET
+    return DEFAULT_TEXT.format(language_line=line)
+
+
+LANGUAGE_UNSET = '# language = "cpp"   (cf get asks)'
 
 
 @dataclass(frozen=True)
@@ -124,8 +134,10 @@ class Settings:
         except OSError as e:
             raise CFError(f"Cannot read {path}: {e.strerror or e}") from e
         if not text:
-            language = value if (key, table) == ("language", None) else self.language or "cpp"
-            text = DEFAULT_TEXT.format(language=language)
+            language = value if (key, table) == ("language", None) else self.language
+            text = default_text(language)
+        elif (key, table) == ("language", None) and LANGUAGE_UNSET in text:
+            text = text.replace(LANGUAGE_UNSET, f'language = "{value}"')  # NOTE: in its place
         try:
             doc = tomlkit.parse(text)
         except TOMLKitError as e:
@@ -152,7 +164,7 @@ class Settings:
         returns its path."""
         path = self.file
         if not path.exists():
-            paths.write_atomic(path, DEFAULT_TEXT.format(language=self.language or "cpp"))
+            paths.write_atomic(path, default_text(self.language))
         return path
 
 
@@ -273,7 +285,7 @@ def migrate(sources: list[Path] | None = None, target: Path | None = None) -> li
             skipped.append((str(chosen[key].get("alias", "?")), key))
         chosen[key] = template
 
-    doc = tomlkit.parse(DEFAULT_TEXT.format(language=default_key or "cpp"))
+    doc = tomlkit.parse(default_text(default_key))
     host = str(data.get("host") or "").rstrip("/")
     if host and host != DEFAULT_HOST:
         doc["host"] = host
@@ -318,6 +330,13 @@ def migrate(sources: list[Path] | None = None, target: Path | None = None) -> li
             + ", ".join(f'"{alias}"' for alias in dropped_scripts)
             + " (cf-tool finds your compilers itself now; cf langs shows what it uses)."
         )
+    folders = data.get("folder_name") if isinstance(data.get("folder_name"), dict) else {}
+    defaults = {"root": "cf", "contest": "contest", "gym": "gym", "group": "group"}
+    if any(folders.get(name, value) != value for name, value in defaults.items()):
+        notes.append(
+            "Not carried over: your folder names (cf-tool finds problems by their "
+            ".cf-problem.json now, and puts new ones in <contest>/<problem>)."
+        )
     for alias, key in skipped:
         kept = str(chosen[key].get("alias", "?"))
         notes.append(
@@ -329,7 +348,13 @@ def migrate(sources: list[Path] | None = None, target: Path | None = None) -> li
 
 def _new_placeholders(script: str) -> str:
     """A 0.3 script with 0.4's placeholders. It runs in the code's folder, so
-    the file's own folder ($%path%$) is no longer needed."""
-    for old, new in (("$%full%$", "{src}"), ("$%file%$", "{name}"), ("$%rand%$", "{name}")):
+    the folder ($%path%$) becomes ./ ({src} names the file with its folder)."""
+    for old, new in (
+        ("$%path%$$%full%$", "{src}"),
+        ("$%path%$", "./"),
+        ("$%full%$", "{src}"),
+        ("$%file%$", "{name}"),
+        ("$%rand%$", "{name}"),
+    ):
         script = script.replace(old, new)
-    return script.replace("$%path%$", "")
+    return script

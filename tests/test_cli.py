@@ -189,6 +189,7 @@ def test_the_first_get_asks_for_a_language(home, monkeypatch):
         return "py"
 
     monkeypatch.setattr(ui, "select", select)
+    monkeypatch.setattr(ui, "interactive", lambda: True)
     home["client"].problems["4A"] = [problem("4", "A", ("8\n", "YES\n"))]
     assert run("get", "4a").exit_code == 0
     assert asked and "Which language" in asked[0]
@@ -196,6 +197,14 @@ def test_the_first_get_asks_for_a_language(home, monkeypatch):
     assert 'language = "py"' in paths.config_file().read_text()
     assert run("get", "4a", "-l", "cpp").exit_code == 0  # NOTE: this once, no question
     assert len(asked) == 1 and (home["work"] / "4" / "a" / "a.cpp").exists()
+
+
+def test_off_a_terminal_the_first_get_writes_cpp(home):
+    home["client"].problems["4A"] = [problem("4", "A", ("8\n", "YES\n"))]
+    result = run("get", "4a")
+    assert result.exit_code == 0 and "No language picked yet: writing C++" in result.output
+    assert (home["work"] / "4" / "a" / "a.cpp").exists()
+    assert not paths.config_file().exists()  # NOTE: nothing was picked, so nothing saved
 
 
 def test_get_needs_a_contest(home):
@@ -287,6 +296,45 @@ def test_test_an_old_folder(home, monkeypatch):
     assert result.exit_code == 0 and "All 1 passed" in result.output
 
 
+def test_an_interactor_in_the_folder_is_used(contest, monkeypatch):
+    folder = contest["work"] / "2050" / "a"
+    (folder / "interactor.py").write_text(
+        "import sys\nsecret = open(sys.argv[1]).read().split()[0]\n"
+        "print(secret, flush=True)\nsys.exit(0 if input() == str(int(secret) * 2) else 1)\n"
+    )
+    monkeypatch.chdir(folder)
+    result = run("test")  # NOTE: not marked interactive, but there is an interactor
+    assert result.exit_code == 0, result.output
+    assert "All 2 passed" in result.output
+
+
+def test_watch_compares_with_an_answer_it_accepted(contest, monkeypatch):
+    folder = contest["work"] / "2050" / "a"
+    (folder / "tests" / "1.ans").unlink()
+
+    def watch(files, run_once):
+        run_once()  # NOTE: accepts 4 as the answer of test 1
+        (folder / "a.py").write_text("print(5)\n")
+        run_once()
+
+    monkeypatch.setattr("cf_tool.cli.testing.judge.watch", watch)
+    monkeypatch.chdir(folder)
+    result = run("test", "-w", "--accept")
+    assert "Kept the output as the answer: 1.ans" in result.output
+    assert result.output.count("Kept the output") == 1 and "wrong answer" in result.output
+    assert (folder / "tests" / "1.ans").read_text() == "4\n"
+
+
+def test_stress_with_named_programs(contest, monkeypatch):
+    folder = contest["work"] / "2050" / "a"
+    (folder / "mygen.py").write_text("import sys\nprint(sys.argv[1])\n")
+    (folder / "slow.py").write_text(DOUBLE)
+    monkeypatch.chdir(folder)
+    result = run("stress", "mygen.py", "slow.py", "-n", "5")  # NOTE: neither is the solution
+    assert result.exit_code == 0, result.output
+    assert "All 5 tests passed" in result.output
+
+
 def test_stress_finds_its_helpers(contest, monkeypatch):
     folder = contest["work"] / "2050" / "a"
     (folder / "gen.py").write_text("import sys\nprint(int(sys.argv[1]) % 7)\n")
@@ -308,7 +356,7 @@ def fake_submit(home, monkeypatch):
     """cf submit up to the network: records the questions and the file menus,
     answers confirmations from record["answers"] and menus with record["pick"]."""
     python_language()
-    record = {"questions": [], "answers": [], "menus": [], "pick": None}
+    record = {"questions": [], "answers": [], "menus": [], "pick": None, "terminal": True}
 
     def confirm(message, *, default=False):
         record["questions"].append((message, default))
@@ -321,6 +369,7 @@ def fake_submit(home, monkeypatch):
 
     monkeypatch.setattr(ui, "confirm", confirm)
     monkeypatch.setattr(ui, "select", select)
+    monkeypatch.setattr(ui, "interactive", lambda: record["terminal"])
     record["dir"] = home["work"]
     record["submitted"] = home["client"].submitted
     return record
@@ -395,12 +444,34 @@ def test_submit_guards_against_another_problems_file(fake_submit):
 
 
 def test_submit_as_cp_editor_calls_it(fake_submit):
-    make_code(fake_submit["dir"], "sol.py", "other.py")
+    fake_submit["terminal"] = False  # NOTE: CP Editor runs cf without a terminal
+    make_code(fake_submit["dir"], "sol.py", "other.py", "B.py")
     full_path = str(fake_submit["dir"] / "sol.py")
     result = run("submit", "546", "D", full_path)
     assert result.exit_code == 0, result.output
     assert fake_submit["submitted"] == [(full_path, "546D", "70")]
+    named_for_b = str(fake_submit["dir"] / "B.py")  # NOTE: both named: taken as meant
+    result = run("submit", "546", "D", named_for_b)
+    assert result.exit_code == 0 and "submitting it to 546D as asked" in result.output
     assert fake_submit["menus"] == [] and fake_submit["questions"] == []
+
+
+def test_off_a_terminal_nothing_is_asked(fake_submit):
+    fake_submit["terminal"] = False
+    make_code(fake_submit["dir"], "546D.py")
+    result = run("submit")  # NOTE: the problem would be read off the name
+    assert (
+        result.exit_code == 1 and "Which problem? Name it: cf submit 546D 546D.py" in result.output
+    )
+    make_code(fake_submit["dir"], "546D.py", "546D_v2.py")
+    result = run("submit", "546D")
+    assert result.exit_code == 1 and "Several code files could be meant" in result.output
+    assert fake_submit["questions"] == [] and fake_submit["menus"] == []
+    settings_file(f'language = "py"\n[py]\nrun = "{sys.executable} {{src}}"\nsubmit = "99"\n')
+    result = run("submit", "546D", "546D.py")  # NOTE: 99 isn't offered: the family's best
+    assert result.exit_code == 0, result.output
+    assert "submitting as PyPy 3.10" in result.output
+    assert fake_submit["submitted"][-1] == ("546D.py", "546D", "70")
 
 
 def test_submit_with_the_file_as_an_argument(fake_submit):
@@ -429,6 +500,7 @@ def test_submit_warns_about_code_that_failed(fake_submit, monkeypatch):
 
 
 def test_submit_without_a_login(fake_submit, home):
+    fake_submit["terminal"] = False
     make_code(fake_submit["dir"], "546D.py")
     home["client"].logged_in = False
     result = run("submit", "546D")
@@ -485,7 +557,8 @@ def test_status_and_its_old_name(contest, monkeypatch):
     monkeypatch.chdir(contest["work"] / "2050" / "a")
     assert run("status").exit_code == 0
     assert run("watch", "--all").exit_code == 0
-    assert contest["client"].watched == [("2050A", 10, "A"), ("2050A", -1, "A")]
+    assert run("watch", "all").exit_code == 0  # NOTE: as cf-tool 0.3 said it
+    assert contest["client"].watched == [("2050A", 10, "A"), ("2050A", -1, "A"), ("2050A", -1, "A")]
 
 
 def test_langs(home):
@@ -498,6 +571,22 @@ def test_langs(home):
 def test_config_path(home):
     result = run("config", "--path")
     assert result.output.strip() == str(paths.config_file())
+
+
+def test_config_opens_a_broken_file_to_fix_it(home, monkeypatch):
+    settings_file("language = \n")
+    edited = []
+
+    def edit(filename):
+        edited.append(filename)
+        Path(filename).write_text('language = "py"\n')  # NOTE: fixed in the editor
+
+    monkeypatch.setattr("click.edit", edit)
+    result = run("config")
+    assert result.exit_code == 0, result.output
+    assert "isn't valid TOML" in result.output and "Saved" in result.output
+    assert edited == [str(paths.config_file())]
+    assert run("config", "--path").exit_code == 0
 
 
 def test_contests(home, monkeypatch):
@@ -580,6 +669,9 @@ def test_upgrade(monkeypatch):
     assert result.exit_code == 1 and "No release" in result.output
     result = _upgrade_with(monkeypatch, [], "0.3.0a1", status=404)
     assert result.exit_code == 1 and "Cannot list the releases" in result.output
+    stable = [{"tag_name": "v0.4.1", "prerelease": False, "draft": False}]
+    result = _upgrade_with(monkeypatch, stable, "0.4.0")
+    assert "uv tool upgrade cf-tool" in result.output and "@v0.4.1" in result.output
 
 
 # ┌──────────────────────────────────────────────────────────┐
@@ -638,3 +730,36 @@ def test_errors_are_one_red_line(home):
     result = run("submit", "-f", "nope.py", "4a")
     assert result.exit_code == 1 and "Traceback" not in result.output
     assert isinstance(CFError("x"), Exception)
+
+
+def test_race_waits_for_the_problems_to_show(home, monkeypatch):
+    python_language()
+    answers = [[], [], [problem("2050", "A", ("1\n", "2\n"))]]
+    home["client"].fetch = lambda target: answers.pop(0)
+    slept = []
+    monkeypatch.setattr("cf_tool.cli.problems.time.sleep", lambda seconds: slept.append(seconds))
+    result = run("race", "2050")
+    assert result.exit_code == 0, result.output
+    assert slept == [2, 2] and home["opened"] == [f"{HOST}/contest/2050/problems"]
+    assert (home["work"] / "2050" / "a" / "tests" / "1.in").exists()
+
+
+def test_a_language_no_longer_offered_is_picked_again(home, monkeypatch):
+    settings_file(f'language = "py"\n[py]\nrun = "{sys.executable} {{src}}"\nsubmit = "99"\n')
+    make_code(home["work"], "546D.py")
+    menus = []
+
+    def select(message, choices, *, default=None, search=False):
+        menus.append((message, [label for label, _ in choices]))
+        return "31"
+
+    monkeypatch.setattr(ui, "interactive", lambda: True)
+    monkeypatch.setattr(ui, "select", select)
+    monkeypatch.setattr(ui, "confirm", lambda message, *, default=False: True)
+    result = run("submit", "546D")
+    assert result.exit_code == 0, result.output
+    message, labels = menus[0]
+    assert "Codeforces doesn't offer 99 here" in message
+    assert labels == ["PyPy 3.10 (7.3.15, 64bit)", "Python 3.13.2", "Don't submit"]
+    assert home["client"].submitted == [("546D.py", "546D", "31")]
+    assert 'submit = "31"' in paths.config_file().read_text()  # NOTE: kept, after a yes

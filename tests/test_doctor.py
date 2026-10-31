@@ -15,8 +15,9 @@ LIVE = {"91": "GNU G++23 14.2 (64 bit, msys2)", "70": "PyPy 3.10 (7.3.15, 64bit)
 GCC = Machine(
     which=lambda p: f"/bin/{p}" if p == "g++-14" else None,
     version=lambda p, f: "g++-14 (GCC) 14.2.0",
+    accepts=None,
 )
-NOTHING = Machine(which=lambda p: None, version=lambda p, f: "", platform="linux")
+NOTHING = Machine(which=lambda p: None, version=lambda p, f: "", platform="linux", accepts=None)
 
 
 @pytest.fixture(autouse=True)

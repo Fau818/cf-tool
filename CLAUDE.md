@@ -80,7 +80,8 @@ cf_tool/
   language-agnostic through `languages.setup()` and `build.Program`. A language is named
   by its extension; one setting per extension.
 - **Local matches the judge**: C++'s `-std` comes from the Codeforces language it is
-  submitted as (`cpp_standard`); the 256 MB stack (macOS linker flag, Linux
+  submitted as (`cpp_standard`; the compiler is asked which spellings it takes, once per
+  version, in STATE_DIR/tools.json); the 256 MB stack (macOS linker flag, Linux
   `RLIMIT_STACK`, MinGW `--stack`); outputs compared word by word like Codeforces'
   default checker, the statement's error/letter-case rules applied (`check_for`).
 - **Builds never land in the user's folders**: the cache key covers source, commands,
@@ -95,7 +96,12 @@ cf_tool/
   file name, or a file named for another problem, needs a confirmation
   (`cli/submitting._submit_target`). Helpers (`gen.*`, `brute.*`, `checker.*`,
   `interactor.*`) are never candidates unless named.
-- **A submission is POSTed once** (`http.post` never retries; `Uncertain` -> look on /my).
+- **A submission is POSTed once** (`http.post` never retries; `Uncertain` -> look on /my
+  for a submission newer than the newest one before the POST; a challenge on the page a
+  POST redirected to is `Uncertain` too).
+- **No prompt without a terminal** (`ui.interactive()` false: CP Editor, pipes): the submit
+  path, the file menu and the first-run language question decide or fail with a message,
+  never wait on stdin.
 - **Login tiers** (gateway.py `login()`): 1 plain HTTP GET+POST /enter (keeps Cloudflare
   cookies, drops old login ones) → 2 headless browser → 3 browser window.
   `LoginRejected` and `BrowserUnavailable` stop the climb — never open a window for those.

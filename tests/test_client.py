@@ -169,14 +169,24 @@ def test_a_rejected_submission(submitting):
         submitting.submit(TARGET, "x", lambda offered: ("54", offered["54"]))
 
 
-def test_a_lost_answer_is_looked_up_not_resent(submitting, monkeypatch):
+MY_PAGE = (FIXTURES / "submissions.html").read_text()  # NOTE: newest: 392264558, problem B
+
+
+def test_a_lost_answer_is_looked_up_not_resent(submitting):
+    """The submissions page tells whether the form arrived: only a submission
+    newer than the newest one before the form was sent counts."""
+    target = Target("contest", "2171", "B")
+    submitting.gw.pages[f"{HOST}/contest/2171/submit"] = SUBMIT_PAGE
     submitting.gw.post_answer = Uncertain("No answer from Codeforces")
-    monkeypatch.setattr(submitting, "_arrived", lambda target: True)
-    submitting.submit(TARGET, "x", lambda offered: ("54", offered["54"]))
+    older = MY_PAGE.replace("392264558", "392264000")
+    seen = iter([older, MY_PAGE])  # NOTE: before the form, then after it
+    submitting.gw.pages[f"{HOST}/contest/2171/my"] = lambda: next(seen)
+    submitting.submit(target, "x", lambda offered: ("54", offered["54"]))
     assert len(submitting.gw.posted) == 1  # NOTE: sent once
-    monkeypatch.setattr(submitting, "_arrived", lambda target: False)
+
+    submitting.gw.pages[f"{HOST}/contest/2171/my"] = MY_PAGE  # NOTE: nothing new arrived
     with pytest.raises(CFError, match="didn't arrive"):
-        submitting.submit(TARGET, "x", lambda offered: ("54", offered["54"]))
+        submitting.submit(target, "x", lambda offered: ("54", offered["54"]))
     assert len(submitting.gw.posted) == 2
 
 

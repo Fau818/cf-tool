@@ -141,6 +141,9 @@ def starter_language(asked: str | None = None) -> str:
         return key
     if current.language:
         return current.language
+    if not ui.interactive():  # NOTE: nobody to ask: C++, this once
+        ui.yellow("No language picked yet: writing C++ (set language in cf config, or give -l)")
+        return "cpp"
     keys = [
         *languages.LANGUAGES,
         *(key for key in current.languages if key not in languages.LANGUAGES),

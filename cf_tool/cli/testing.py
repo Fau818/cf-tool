@@ -180,16 +180,17 @@ def test(
         listed = ", ".join(t.name for t in found)
         raise CFError(f"No test {', '.join(unknown)} here (there are {listed})")
     tests = [t for t in found if t.name in names] if names else found
+    chosen = {t.name for t in tests}
 
     interactor_program = None
-    if interactor or (info and info.interactive):
-        spec = interactor or (str(helper(folder, "interactor") or ""))
-        if not spec:
-            raise CFError(
-                "This problem is interactive: cf test runs it against an interactor. Write one "
-                "as interactor.cpp (any language) in its folder, or name one with --interactor"
-            )
+    spec = interactor or str(helper(folder, "interactor") or "")
+    if spec:
         interactor_program = _program_or_command(spec, folder)
+    elif info and info.interactive:
+        raise CFError(
+            "This problem is interactive: cf test runs it against an interactor. Write one "
+            "as interactor.cpp (any language) in its folder, or name one with --interactor"
+        )
 
     if file:
         name, key = file, languages.language_key(file, settings())
@@ -215,8 +216,11 @@ def test(
             exact=exact,
             checker=check_program,
         )
+        current = [
+            t for t in workspace.tests_of(folder) if t.name in chosen
+        ]  # NOTE: read again: --accept may have given answers
         summary = judge.run_tests(
-            solution, tests, info=info, check=check, accept=accept, interactor=interactor_program
+            solution, current, info=info, check=check, accept=accept, interactor=interactor_program
         )
         judge.remember(path, summary)
         if summary.failed and not watch_it:

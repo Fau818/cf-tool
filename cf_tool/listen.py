@@ -23,6 +23,7 @@ from cf_tool.errors import CFError
 from cf_tool.workspace import (
     ProblemInfo,
     Target,
+    load_info,
     parse_target,
     problem_folder,
     read_spec,
@@ -33,6 +34,7 @@ from cf_tool.workspace import (
 DEFAULT_PORT = 4244  # NOTE: Hightail's, a tool gone quiet; the extension still sends there
 REQUEST_TIMEOUT = 5.0  # seconds a connection gets to send its problem
 MAX_BODY = 16 * 1024 * 1024  # bytes
+EXTENSION_ORIGINS = ("chrome-extension://", "moz-extension://", "safari-web-extension://")
 
 # what to do with a problem once its folder is written: (folder, target, info)
 OnProblem = Callable[[Path, Target, ProblemInfo], None]
@@ -58,6 +60,7 @@ def save_problem(data: dict, root: Path) -> tuple[Path, Target, ProblemInfo, int
     ]
     save_samples(folder, tests)
     limit, memory = data.get("timeLimit"), data.get("memoryLimit")
+    known = load_info(folder)  # NOTE: cf get read more from the statement than the extension sends
     info = ProblemInfo(
         name=str(data.get("name", "")),
         url=url,
@@ -65,6 +68,11 @@ def save_problem(data: dict, root: Path) -> tuple[Path, Target, ProblemInfo, int
         memory_limit=int(memory) if isinstance(memory, (int, float)) else None,
         interactive=bool(data.get("interactive", False)),
     )
+    if known is not None:
+        info.ignore_case, info.epsilon = known.ignore_case, known.epsilon
+        info.interactive = info.interactive or known.interactive
+        if len(known.cases) == len(tests):
+            info.cases = known.cases
     save_info(folder, info)
     return folder, target, info, len(tests)
 
@@ -81,18 +89,19 @@ class _Handler(BaseHTTPRequestHandler):
     timeout = REQUEST_TIMEOUT  # NOTE: a connection that sends nothing can't hold up the next
 
     def do_POST(self) -> None:
-        origin = self.headers.get("Origin", "")
         length = self.headers.get("Content-Length") or "0"
-        if origin.startswith(("http://", "https://")):
-            self._answer(403)  # NOTE: a web page, not the extension
-            return
-        if "json" not in self.headers.get("Content-Type", "").lower():
-            self._answer(415)
-            return
         if not length.isdigit() or int(length) > MAX_BODY:
             self._answer(413)
             return
-        body = self.rfile.read(int(length))
+        body = self.rfile.read(int(length))  # NOTE: read first: an unread body resets the answer
+        origin = self.headers.get("Origin")
+        if origin is not None and not origin.startswith(EXTENSION_ORIGINS):
+            self._answer(403)  # NOTE: a web page (or a sandboxed one: "null"), not the extension
+            return
+        content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            self._answer(415)  # NOTE: a page can't send JSON here without asking first
+            return
         self._answer(200)
         self.server.received.append(body)  # type: ignore[attr-defined]
 

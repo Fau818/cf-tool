@@ -28,16 +28,26 @@ def _label(contest: str, problem: str) -> str:
     return f"problem {problem}" if problem else f"contest {contest}"
 
 
-def _submit_target(target: Target, filename: str, specs: tuple[str, ...]) -> Target:
+def _submit_target(
+    target: Target, filename: str, specs: tuple[str, ...], file_given: bool
+) -> Target:
     """The problem to submit filename to: target, its gaps filled in from what
     the file's name says. Both a file named for another problem and a target
-    read off the name need a yes first."""
+    read off the name need a yes first. Off a terminal nobody can say yes
+    (CP Editor calls cf so): a file and a problem both named are taken as
+    meant, anything else is refused."""
     contest, problem = workspace.named_target(filename, Path.cwd())
     clash = (target.contest and contest and contest != target.contest) or (
         target.problem and problem and problem != target.problem
     )
     if clash:
-        question = f"{filename} looks like {_label(contest, problem)}. Submit it to {target.label}?"
+        looks = f"{filename} looks like {_label(contest, problem)}"
+        if not ui.interactive():
+            if file_given and specs:
+                ui.yellow(f"{looks}; submitting it to {target.label} as asked")
+                return target
+            raise CFError(f"{looks}, not {target.label}: name both")
+        question = f"{looks}. Submit it to {target.label}?"
         if not ui.confirm(question, default=False):
             raise CFError("Not submitted")
         return target
@@ -49,6 +59,8 @@ def _submit_target(target: Target, filename: str, specs: tuple[str, ...]) -> Tar
     if not missing:
         return target
     target = target_of(specs + tuple(missing))
+    if not ui.interactive():
+        raise CFError(f"Which problem? Name it: cf submit {target.label} {filename}")
     if not ui.confirm(f"Submit {filename} to {target.label}?", default=True):
         raise CFError("Not submitted")
     return target
@@ -70,6 +82,9 @@ def _language_chooser(key: str, path: Path, asked: str):
             wanted = spec or languages.display_name(key)
             raise CFError(f"Codeforces doesn't offer {wanted} here, nor anything like it")
         old = languages.known_languages().get(spec, spec) if spec else languages.display_name(key)
+        if not ui.interactive():  # NOTE: nobody to ask: the family's best, this once
+            ui.yellow(f"Codeforces doesn't offer {old} here: submitting as {options[0][1]}")
+            return options[0]
         lang_id = ui.select(
             f"Codeforces doesn't offer {old} here. Submit {path.name} as:",
             [(name, lid) for lid, name in options] + [("Don't submit", None)],
@@ -128,7 +143,7 @@ def submit(args: tuple[str, ...], file_arg: str | None, language: str) -> None:
         )
         path = (search / name).resolve()
         filename = str(Path(name)) if search == cwd else _relative(path, cwd)
-    target = _submit_target(target, filename, specs)
+    target = _submit_target(target, filename, specs, file_given=bool(file_arg))
     failed = judge.failed_tests(path)
     if failed and ui.interactive():
         tests = ", ".join(failed[:3]) + (" ..." if len(failed) > 3 else "")
@@ -155,6 +170,8 @@ def _relative(path: Path, cwd: Path) -> str:
 @cf_command
 def status(specs: tuple[str, ...], show_all: bool) -> None:
     """Your submissions to the contest, refreshed until they're judged."""
+    if "all" in specs:  # NOTE: cf-tool 0.3's cf watch all
+        show_all, specs = True, tuple(s for s in specs if s != "all")
     target = target_of(specs)
     c = client()
     ensure_login(c)
@@ -167,6 +184,8 @@ def status(specs: tuple[str, ...], show_all: bool) -> None:
 @cf_command
 def pull(specs: tuple[str, ...], ac: bool) -> None:
     """Download the code of your submissions into the problems' folders."""
+    if "ac" in specs:  # NOTE: cf-tool 0.3's cf pull ac
+        ac, specs = True, tuple(s for s in specs if s != "ac")
     target = target_of(specs)
     c = client()
     ensure_login(c)
@@ -181,11 +200,17 @@ def pull(specs: tuple[str, ...], ac: bool) -> None:
 
 
 @click.command()
-@click.argument("handle", required=False)
+@click.argument("args", nargs=-1, metavar="[HANDLE]")
 @click.option("--ac", is_flag=True, help="Accepted ones only.")
 @cf_command
-def clone(handle: str | None, ac: bool) -> None:
+def clone(args: tuple[str, ...], ac: bool) -> None:
     """Download the code of every submission of a user (default: you)."""
+    if "ac" in args:  # NOTE: cf-tool 0.3's cf clone ac
+        ac = True
+    handles = [arg for arg in args if arg != "ac"]
+    if len(handles) > 1:
+        raise CFError("One handle at a time")
+    handle = handles[0] if handles else None
     c = client()
     handle = handle or c.handle
     if not handle:

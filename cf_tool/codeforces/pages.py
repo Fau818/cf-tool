@@ -312,7 +312,7 @@ def parse_problems(body: str) -> list[ProblemRow]:
     soup = BeautifulSoup(body, "lxml")
     table = soup.find("table", class_="problems")
     if table is None:
-        raise CFError("Cannot find any problem statis")
+        raise CFError("No problem list on the page: has the contest begun?")
     problems = []
     for row in table.find_all("tr")[1:]:
         cells = row.find_all("td")
@@ -345,7 +345,7 @@ def parse_problems(body: str) -> list[ProblemRow]:
             )
         )
     if not problems:
-        raise CFError("Cannot find any problem")
+        raise CFError("No problems on the page: has the contest begun?")
     return problems
 
 

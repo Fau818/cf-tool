@@ -11,7 +11,7 @@ from rich import box
 from rich.table import Table
 from rich.text import Text
 
-from cf_tool import __version__, languages, ui
+from cf_tool import __version__, languages, paths, ui
 from cf_tool.cli.common import cf_command, client, reset, settings, short, starter_language
 from cf_tool.errors import CFError
 from cf_tool.settings import Settings
@@ -25,23 +25,28 @@ REPOSITORY = "Fau818/cf-tool"
 def config(path_only: bool) -> None:
     """Open the settings (config.toml) in your editor; every setting in it
     is explained there, and all of them are optional."""
-    current = settings()
+    path = paths.config_file()
     if path_only:
-        click.echo(str(current.file))  # NOTE: never wrapped, for scripts
+        click.echo(str(path))  # NOTE: never wrapped, for scripts
         return
-    if not current.file.exists():
+    try:
+        current = settings()
+    except CFError as e:  # NOTE: a broken file is opened all the same, to fix it
+        ui.yellow(str(e))
+        current = None
+    if current is not None and not path.exists():
         if not current.language and ui.interactive():
             starter_language()
         current.write_default()
-    click.edit(filename=str(current.file))
+    click.edit(filename=str(path))
+    reset()
     try:
-        reloaded = Settings.load(current.file)
+        reloaded = Settings.load(path)
     except CFError as e:
         raise CFError(f"{e}\nRun cf config again to fix it") from e
     for warning in reloaded.warnings:
         ui.yellow(warning)
-    reset()
-    ui.green(f"Saved {short(current.file)}")
+    ui.green(f"Saved {short(path)}")
 
 
 @click.command()
@@ -179,6 +184,9 @@ def upgrade() -> None:
         ui.green("You already have the latest version")
         return
     ui.green(f"Latest version is {latest}. Upgrade with:")
+    if latest_key[-2] == 3:  # NOTE: a release, not a pre-release: on PyPI
+        ui.plain("  uv tool upgrade cf-tool        (or: pipx upgrade cf-tool)")
+        ui.plain("Installed from GitHub:")
     ui.plain(f"  uv tool install --force git+https://github.com/{REPOSITORY}@{latest}")
     ui.plain(f"  (or: pipx install --force git+https://github.com/{REPOSITORY}@{latest})")
 

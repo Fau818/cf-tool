@@ -14,7 +14,6 @@ import math
 import random
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -182,6 +181,7 @@ class Client:
         )
         csrf = pages.find_csrf(body)
         ftaa, bfaa = self.gw.form_tokens()
+        before = self._newest(target)  # NOTE: tells a lost answer's submission from older ones
         try:
             body = self.gw.post(
                 f"{url}?csrf_token={csrf}",
@@ -201,7 +201,7 @@ class Client:
             )
         except Uncertain as e:
             ui.yellow(f"{e}: looking for the submission among yours...")
-            if not self._arrived(target):
+            if not self._arrived(target, before):
                 raise CFError(
                     "The submission doesn't show up among yours: it didn't arrive. "
                     "Submit it again."
@@ -221,18 +221,21 @@ class Client:
         self.gw.save()
         return submission
 
-    def _arrived(self, target: Target) -> bool:
-        """Whether your newest submission is to target and from the last few minutes."""
+    def _newest(self, target: Target) -> int:
+        """The id of your newest submission to the contest; 0 when there is none."""
+        try:
+            return pages.parse_submissions(self.gw.get_authed(target.my_url(self.host)), 1)[0].id
+        except CFError:
+            return 0
+
+    def _arrived(self, target: Target, before: int) -> bool:
+        """Whether your newest submission to the contest came after the one
+        numbered before, and is to target's problem."""
         try:
             newest = pages.parse_submissions(self.gw.get_authed(target.my_url(self.host)), 1)[0]
         except CFError:
             return False
-        try:
-            when = datetime.strptime(newest.when, "%Y-%m-%d %H:%M")
-        except ValueError:
-            return False
-        recent = abs((datetime.now() - when).total_seconds()) < 180
-        return recent and newest.problem_index() == target.problem.lower()
+        return newest.id > before and newest.problem_index() == target.problem.lower()
 
     def watch(
         self, target: Target, count: int = 10, problem: str = "", single: bool = False

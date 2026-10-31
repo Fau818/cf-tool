@@ -124,8 +124,8 @@ def test_user_agent_is_remembered():
 
 
 class Answer:
-    def __init__(self, status, text="", headers=None):
-        self.status_code, self.text, self.headers = status, text, headers or {}
+    def __init__(self, status, text="", headers=None, url=""):
+        self.status_code, self.text, self.headers, self.url = status, text, headers or {}, url
 
 
 @pytest.fixture
@@ -184,3 +184,18 @@ def test_a_post_is_sent_once(monkeypatch, no_wait):
         transport.post("https://codeforces.com/contest/4/submit", data={})
     assert calls == ["POST"]
     assert issubclass(Uncertain, CFError)
+
+
+def test_a_check_after_the_form_was_sent_is_uncertain(monkeypatch, no_wait):
+    # NOTE: the POST got through; Cloudflare checked the page it redirected to
+    transport = Transport()
+    challenge = {"cf-mitigated": "challenge"}
+    url = "https://codeforces.com/contest/4/submit?csrf_token=x"
+    fake_session(
+        transport, monkeypatch, [Answer(403, "", challenge, "https://codeforces.com/contest/4/my")]
+    )
+    with pytest.raises(Uncertain, match="after the form"):
+        transport.post(url, data={})
+    fake_session(transport, monkeypatch, [Answer(403, "", challenge, url)])
+    with pytest.raises(CloudflareChallengeError):  # NOTE: stopped before Codeforces
+        transport.post(url, data={})

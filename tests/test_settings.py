@@ -227,6 +227,25 @@ def test_migrate_from_the_go_tool(config_dir, tmp_path, monkeypatch):
     assert any("[hs]" in note for note in notes)
 
 
+def test_old_folder_placeholders(config_dir):
+    from cf_tool.settings import _new_placeholders
+
+    assert _new_placeholders("$%path%$$%file%$") == "./{name}"
+    assert _new_placeholders("ghc $%path%$$%full%$ -o $%file%$") == "ghc {src} -o {name}"
+    assert _new_placeholders("runhaskell $%full%$") == "runhaskell {src}"
+
+
+def test_a_linked_settings_file_stays_a_link(config_dir, tmp_path):
+    real = tmp_path / "dotfiles" / "config.toml"
+    real.parent.mkdir()
+    real.write_text('language = "cpp"\n')
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").symlink_to(real)
+    Settings.load().update("language", "py")
+    assert (config_dir / "config.toml").is_symlink()
+    assert 'language = "py"' in real.read_text()
+
+
 def test_nothing_to_migrate(config_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     assert migrate() == []
@@ -238,3 +257,21 @@ def test_a_broken_old_config(config_dir, tmp_path, monkeypatch):
     write(config_dir / "config", "{not json")
     assert "Could not read your old settings" in migrate()[0]
     assert not (config_dir / "config.toml").exists()
+
+
+def test_another_first_setting_leaves_the_language_open(config_dir):
+    # NOTE: or cf get would never ask, and write C++ for a Python user
+    settings = Settings.load()
+    settings.update("submit", "70", table="py")
+    assert Settings.load().language == ""
+    assert '# language = "cpp"' in (config_dir / "config.toml").read_text()
+    settings.update("language", "py")
+    assert Settings.load().language == "py"
+    text = (config_dir / "config.toml").read_text()
+    assert text.index('language = "py"') < text.index("# [cpp]")  # NOTE: in its place
+
+
+def test_custom_folder_names_are_mentioned(config_dir):
+    old = dict(OLD, folder_name={"root": "codeforces", "contest": "contest"})
+    write(config_dir / "config", json.dumps(old))
+    assert any("your folder names" in note for note in migrate())

@@ -228,6 +228,28 @@ def test_old_tests(tmp_path):
     ]
 
 
+def test_old_tests_stay_beside_new_ones(tmp_path):
+    # NOTE: cf get run in a 0.3 folder writes tests/; the user's own in3.txt must still run
+    for i in (1, 2, 3):
+        (tmp_path / f"in{i}.txt").write_text(f"old {i}\n")
+    save_samples(tmp_path, [("new 1\n", "x\n"), ("new 2\n", "y\n")])
+    found = tests_of(tmp_path)
+    assert [t.name for t in found] == ["1", "2", "3"]
+    assert found[0].input == tmp_path / "tests" / "1.in"  # NOTE: tests/ wins a clash
+    assert found[2].input == tmp_path / "in3.txt"
+
+
+def test_get_root_of_a_folder_made_before_metadata(tmp_path):
+    old = tmp_path / "cf" / "contest" / "2050" / "a"
+    old.mkdir(parents=True)
+    (old / "in1.txt").write_text("1\n")
+    assert get_root(old) == (tmp_path / "cf" / "contest").resolve()  # NOTE: not old/2050/a
+    assert get_root(old.parent) == (tmp_path / "cf" / "contest").resolve()
+    plain = tmp_path / "2024"
+    plain.mkdir()
+    assert get_root(plain) == plain.resolve()  # NOTE: digits alone don't make a contest
+
+
 def test_save_and_add(tmp_path):
     save_samples(tmp_path, [("1\n", "2\n"), ("3\n", "6\n")])
     assert (tmp_path / "tests" / "2.ans").read_text() == "6\n"
@@ -273,6 +295,7 @@ def prompt(monkeypatch):
         return next(f for f in files if f.name == wanted) if wanted else default
 
     monkeypatch.setattr(workspace.ui, "select", select)
+    monkeypatch.setattr(workspace.ui, "interactive", lambda: True)
     select.calls = calls
     return select
 
@@ -446,3 +469,10 @@ def test_read_source_encodings(tmp_path, capsys):
     assert "not UTF-8" in capsys.readouterr().out
     with pytest.raises(CFError, match="Cannot read"):
         read_source(tmp_path / "missing.cpp")
+
+
+def test_no_menu_off_a_terminal(tmp_path, monkeypatch):
+    monkeypatch.setattr(workspace.ui, "interactive", lambda: False)
+    make(tmp_path, "a.cpp", "b.cpp")
+    with pytest.raises(CFError, match=r"Several code files could be meant \(b.cpp, a.cpp\)"):
+        pick_code(None, tmp_path, SETTINGS)

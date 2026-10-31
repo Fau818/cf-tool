@@ -130,12 +130,15 @@ def test_web_pages_are_turned_away(tmp_path):
     worker, port = serve(tmp_path, keep=True)
     body = json.dumps(PROBLEM).encode()
     assert post(port, body, {"Origin": "https://evil.example"}) == 403
+    assert post(port, body, {"Origin": "null", "Content-Type": "text/plain; x=json"}) == 403
     assert post(port, body, {"Content-Type": "text/plain"}) == 415
+    assert post(port, body, {"Content-Type": "text/plain; x=json"}) == 415
     assert post(port, body, {"Origin": "chrome-extension://abc"}) == 200  # NOTE: the extension
+    saved = tmp_path / "954" / "g" / ".cf-problem.json"  # NOTE: written last
     deadline = time.monotonic() + 5
-    while not (tmp_path / "954").exists() and time.monotonic() < deadline:
+    while not saved.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert (tmp_path / "954" / "g").is_dir()
+    assert saved.exists()
 
 
 def test_a_silent_connection_does_not_block(tmp_path, monkeypatch):
@@ -168,3 +171,14 @@ def test_the_server_starts_without_looking_up_the_host_name(monkeypatch):
     server = listen._Server(("127.0.0.1", 0), listen._Handler)
     server.server_close()
     assert time.monotonic() - started < 5
+
+
+def test_what_cf_get_learned_stays(tmp_path):
+    from cf_tool.workspace import ProblemInfo, problem_folder, save_info
+
+    folder = problem_folder(tmp_path, Target("contest", "954", "G"))
+    save_info(folder, ProblemInfo(epsilon=1e-6, ignore_case=True, cases=[None, None]))
+    listen.save_problem(PROBLEM, tmp_path)
+    saved = load_info(folder)
+    assert (saved.epsilon, saved.ignore_case, saved.cases) == (1e-6, True, [None, None])
+    assert saved.time_limit == 1.5  # NOTE: and the extension's own news

@@ -30,10 +30,21 @@ from cf_tool.workspace import Target
 # └──────────────────────────────────────────────────────────┘
 
 
-def set_up(target: Target, key: str) -> Path:
-    """Fetch target's problems and give each its folder: tests, info and
-    starter code; returns the contest's folder."""
-    found = client().fetch(target)
+def set_up(target: Target, key: str, tries: int = 1) -> Path:
+    """Fetch target's problems (tries times, 2 s apart, while there are none
+    yet) and give each its folder: tests, info and starter code; returns the
+    contest's folder."""
+    for attempt in range(tries):
+        try:
+            found = client().fetch(target)
+        except CFError:
+            if attempt == tries - 1:
+                raise
+            found = []
+        if found:
+            break
+        if attempt < tries - 1:
+            time.sleep(2)  # NOTE: right at the start, the problems may not show yet
     if not found:
         wait = f"cf race {target.contest} waits for its start"
         raise CFError(f"{target.label} has no problems to see yet: {wait}")
@@ -120,7 +131,7 @@ def race(specs: tuple[str, ...], language: str | None) -> None:
     ui.line(("Waiting for ", "cyan"), (contest.label, "bold"))
     client().race(contest)
     open_url(contest.problems_url(settings().host))
-    set_up(contest, key)
+    set_up(contest, key, tries=5)
 
 
 # ┌──────────────────────────────────────────────────────────┐

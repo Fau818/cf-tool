@@ -339,6 +339,12 @@ def get_root(cwd: Path, root: Path | None = None) -> Path:
     - the configured root
     - the current folder"""
     current = contest_folder(cwd)
+    if current is None:
+        named = _from_names(cwd)  # NOTE: a folder made before metadata, with its tests
+        if named is not None and named.problem and tests_of(cwd):
+            current = cwd.resolve().parent
+        elif named is not None and any(tests_of(child) for child in _subdirs(cwd)):
+            current = cwd.resolve()
     if current is not None:
         return current.parent
     return root if root is not None else cwd.resolve()
@@ -428,21 +434,22 @@ def tests_of(folder: Path) -> list[Test]:
     """A problem folder's tests, numbered ones first in order, then the rest
     by name:
     - tests/<name>.in, with tests/<name>.ans (none: a test that is only run)
-    - without a tests folder, cf-tool 0.3's in<i>.txt with ans<i>.txt"""
+    - cf-tool 0.3's in<i>.txt with ans<i>.txt, unless tests/ has that number"""
     tests_folder = folder / TESTS
-    found: list[Test] = []
+    found: dict[str, Test] = {}
+    for entry in _entries(folder):
+        match = _OLD_INPUT_RE.match(entry.name)
+        if match and entry.is_file():
+            answer = folder / f"ans{match.group(1)}.txt"
+            found[match.group(1)] = Test(
+                match.group(1), entry, answer if answer.is_file() else None
+            )
     if tests_folder.is_dir():
         for entry in tests_folder.iterdir():
             if entry.suffix == ".in" and entry.is_file():
                 answer = entry.with_suffix(".ans")
-                found.append(Test(entry.stem, entry, answer if answer.is_file() else None))
-    else:
-        for entry in _entries(folder):
-            match = _OLD_INPUT_RE.match(entry.name)
-            if match and entry.is_file():
-                answer = folder / f"ans{match.group(1)}.txt"
-                found.append(Test(match.group(1), entry, answer if answer.is_file() else None))
-    return sorted(found, key=lambda test: _test_order(test.name))
+                found[entry.stem] = Test(entry.stem, entry, answer if answer.is_file() else None)
+    return sorted(found.values(), key=lambda test: _test_order(test.name))
 
 
 def _write(path: Path, text: str) -> None:
@@ -593,10 +600,10 @@ def find_code(
     and with a known contest, those in its folders below cwd, and when cwd is
     one of these folders, the problem's files around it. Helpers (gen.*,
     brute.*, ...) and the files in exclude are left out."""
-    skip = {os.path.normpath(name) for name in exclude}
+    cwd = cwd.resolve()
+    skip = {(cwd / name).resolve() for name in exclude}  # NOTE: relative to cwd, or absolute
     extensions = languages.code_extensions(settings)
     names = _Names(contest, problem)
-    cwd = cwd.resolve()
     folders = [cwd]
     around: list[Path] = []  # of these folders' files, only this problem's count
     if contest:
@@ -618,9 +625,9 @@ def find_code(
             score = names.score(entry)
             if folder in around and score != RELATED:
                 continue
-            name = os.path.relpath(entry, cwd)  # NOTE: ../../2050A.cpp from 2050/a/
-            if name in skip:
+            if entry.resolve() in skip:
                 continue
+            name = os.path.relpath(entry, cwd)  # NOTE: ../../2050A.cpp from 2050/a/
             key = languages.language_key(entry, settings)
             if key is None:
                 continue
@@ -661,6 +668,9 @@ def _choose(files: list[CodeFile], action: str) -> CodeFile:
     the one the user picks, the best being pre-selected."""
     if len(files) == 1:
         return files[0]
+    if not ui.interactive():  # NOTE: a menu nobody can answer would wait forever
+        names = ", ".join(f.name for f in files[:4]) + (", ..." if len(files) > 4 else "")
+        raise CFError(f"Several code files could be meant ({names}): name the one to {action}")
     width = max(cell_len(f.name) for f in files)
     now = time.time()
     choices: list[ui.Choice | ui.Heading] = []

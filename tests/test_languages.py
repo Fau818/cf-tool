@@ -56,6 +56,7 @@ def machine(banners: dict[str, str], platform: str = "linux") -> Machine:
         which=lambda program: f"/bin/{program}" if program in banners else None,
         version=lambda program, flag: banners[program],
         platform=platform,
+        accepts=None,  # NOTE: the standard by the compiler's version: nothing is run
     )
 
 
@@ -180,7 +181,9 @@ def test_versions_are_remembered(monkeypatch, tmp_path):
         ("GNU G++20 13.2 (64 bit, winlibs)", "gcc", (14, 2), "c++20"),
         ("GNU G++17 7.3.0", "clang", (18,), "c++17"),
         ("C++20 (GCC 13-64)", "gcc", (13,), "c++20"),
-        ("GNU G++23 14.2", "gcc", (10, 2), "c++2b"),
+        ("GNU G++23 14.2", "gcc", (10, 2), "c++20"),  # NOTE: c++2b came with GCC 11
+        ("GNU G++23 14.2", "gcc", (9, 4), "c++2a"),
+        ("GNU G++23 14.2", "clang", (11,), "c++20"),
         ("GNU G++23 14.2", "apple clang", (15,), "c++2b"),
         ("GNU G++23 14.2", "apple clang", (17,), "c++23"),
         ("", "gcc", (14,), "c++23"),
@@ -189,6 +192,33 @@ def test_versions_are_remembered(monkeypatch, tmp_path):
 def test_cpp_standard(submit, kind, version, standard):
     tool = languages.Tool("g++", "g++", kind=kind, version=version)
     assert cpp_standard(submit, tool) == standard
+
+
+def test_the_compiler_is_asked_which_standards_it_takes():
+    tool = languages.Tool("g++", "g++", kind="gcc", version=(14,))
+    asked = []
+
+    def accepts(program, std):
+        asked.append(std)
+        return std in ("c++2a", "c++17")
+
+    assert cpp_standard("GNU G++23 14.2", tool, accepts) == "c++2a"
+    assert asked == ["c++23", "c++2b", "c++20", "c++2a"]
+
+
+def test_asking_is_remembered(monkeypatch):
+    runs = []
+
+    def run(argv, **kwargs):
+        runs.append(argv)
+        return subprocess.CompletedProcess(argv, 0 if "-std=c++20" in argv else 1, b"", b"")
+
+    monkeypatch.setattr(shutil, "which", lambda program: "/opt/bin/g++")
+    monkeypatch.setattr(languages, "_cached_version", lambda program, flag: "g++ (GCC) 10.2.1")
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(languages, "_banners", None)
+    assert not languages._accepts_std("g++", "c++23") and languages._accepts_std("g++", "c++20")
+    assert languages._accepts_std("g++", "c++20") and len(runs) == 2  # NOTE: once each
 
 
 def test_cpp_on_linux():
@@ -350,6 +380,8 @@ def test_the_built_in_list_has_every_family():
     [
         ("cpp", "", "5"),
         ("cpp", "89", None),  # NOTE: not offered here
+        ("cpp", "20", "4"),  # NOTE: id 20 is Haskell: as part of a name, G++20
+        ("hs", "20", "20"),
         ("cpp", "3", "3"),
         ("cpp", "G++20", "4"),
         ("cpp", "c++20", "4"),  # NOTE: C++ and G++ are the same here

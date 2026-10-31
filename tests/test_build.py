@@ -117,3 +117,41 @@ def test_fill():
         "-I/c/inc",
         "{other}",
     ]
+
+
+def test_a_header_change_in_an_include_folder_builds_again(tmp_path, cache):
+    library = tmp_path / "lib"
+    library.mkdir()
+    header = library / "mylib.h"
+    header.write_text("// 1\n")
+    source = tmp_path / "a.x"
+    source.write_text("print(1)\n")
+    log = tmp_path / "log"
+    setup = fake_setup(log)
+    setup = Setup(**{**setup.__dict__, "build": (*setup.build, f"-I{library}")})
+    Program(source, setup).build()
+    assert Program(source, setup).build().cached
+    header.write_text("// 2, a little longer\n")
+    assert not Program(source, setup).build().cached and builds(log) == 2
+
+
+def test_a_build_finished_meanwhile_is_kept(tmp_path, cache, monkeypatch):
+    # NOTE: two cf at once: the one that finishes second leaves the first's build alone
+    source = tmp_path / "a.x"
+    source.write_text("print(1)\n")
+    program = Program(source, fake_setup(tmp_path / "log"))
+    real_run = build.process.run
+
+    def run(argv, **options):
+        result = real_run(argv, **options)
+        folder = program._folder
+        folder.mkdir(parents=True)
+        (folder / "prog.py").write_text("print('first')\n")
+        (folder / ".built").write_text("")
+        return result
+
+    monkeypatch.setattr(build.process, "run", run)
+    program.build()
+    monkeypatch.setattr(build.process, "run", real_run)
+    assert program.run(timeout=30).stdout == b"first\n"
+    assert [p.name for p in (cache / "build").iterdir()] == [program._folder.name]

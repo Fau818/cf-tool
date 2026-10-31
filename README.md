@@ -34,6 +34,7 @@ the login.
 uv tool install cf-tool       # or: pipx install cf-tool
 ```
 
+The newest code, straight from GitHub: `uv tool install git+https://github.com/Fau818/cf-tool`.
 `cf upgrade` tells you when there is a newer version.
 
 ## Getting started
@@ -135,8 +136,8 @@ template = "~/cp/template.cpp"
 ```
 
 - **Compilers.** cf finds them by itself, GCC first. C++ is compiled with the standard of
-  the Codeforces language it is submitted as, so code that compiles here compiles there.
-  `cf langs` shows what each language uses.
+  the Codeforces language it is submitted as (or the newest your compiler knows), so code
+  that compiles here compiles there. `cf langs` shows what each language uses.
 - **Submit language.** By default the newest one of the family (G++23 for C++, PyPy for
   Python). `cf langs --all` lists every language Codeforces offers, with its id.
 - **Starter code.** Your own goes in `~/.config/cf/templates/template.cpp` (or set

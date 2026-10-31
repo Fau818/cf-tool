@@ -41,7 +41,9 @@ def session_file() -> Path:
 
 def write_atomic(path: Path, text: str, mode: int = 0o644) -> None:
     """Replace path with text in one step, created with the given permissions
-    (a Ctrl-C mid-write never leaves a truncated file behind)."""
+    (a Ctrl-C mid-write never leaves a truncated file behind). A symbolic link
+    stays one: the file it points to is written."""
+    path = Path(os.path.realpath(path))  # NOTE: a config.toml kept in a dotfiles repo
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:

@@ -20,6 +20,7 @@ import threading
 import time
 from http.cookiejar import Cookie
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from curl_cffi import requests as curl_requests
 
@@ -160,7 +161,12 @@ class Transport:
                 method, url, allow_redirects=True, **kwargs  # type: ignore[arg-type]
             )
         if is_challenge(response):
-            raise CloudflareChallengeError()
+            challenge = CloudflareChallengeError()
+            # NOTE: checked on a page redirected to: the request itself got through
+            final = getattr(response, "url", "") or url
+            moved = urlparse(final).path != urlparse(url).path
+            challenge.redirected = moved  # type: ignore[attr-defined]
+            raise challenge
         if response.status_code >= 500 or response.status_code == 429:
             raise ServerError(response.status_code)
         return response
@@ -189,6 +195,10 @@ class Transport:
             raise Uncertain(f"No answer from Codeforces ({_first_line(e)})") from e
         except ServerError as e:
             raise Uncertain(str(e)) from e
+        except CloudflareChallengeError as e:
+            if getattr(e, "redirected", False):
+                raise Uncertain("Cloudflare checked the page shown after the form") from e
+            raise  # NOTE: stopped before Codeforces: safe to send again once passed
 
     def get_json(self, url: str) -> dict[str, Any]:
         response = self.get(url)

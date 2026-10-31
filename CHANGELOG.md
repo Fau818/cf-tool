@@ -9,9 +9,9 @@ A new cf-tool: it no longer follows the Go cf-tool's model, and needs no setup.
   `~/.config/cf/config.toml` that `cf config` opens: the compiler, extra flags, the
   Codeforces language, your starter file, or whole build and run commands.
 - **Local matches the judge.** C++ is compiled with the standard of the language it is
-  submitted as (G++20 → `-std=c++20`), with Codeforces' 256 MB stack. Outputs are compared
-  word by word, like Codeforces' usual checker; the statement's error and letter-case rules
-  apply on their own.
+  submitted as (G++20 → `-std=c++20`; with an older compiler, the newest one it knows),
+  with Codeforces' 256 MB stack. Outputs are compared word by word, like Codeforces' usual
+  checker; the statement's error and letter-case rules apply on their own.
 - **`cf get`** replaces `parse` and `gen`: one folder per problem (`2050/a/`) with its
   tests in `tests/` and your starter code, and a whole contest in a single request.
   A problem folder knows its problem (`.cf-problem.json`), so commands work anywhere
@@ -21,8 +21,9 @@ A new cf-tool: it no longer follows the Go cf-tool's model, and needs no setup.
   an interactor; `checker.*` in the problem's folder judges by itself. A time limit
   stops everything the program started, and output past 64 MB stops it.
 - **`cf submit`** logs in on the spot when needed, asks before sending code that failed
-  its tests, and sends the form only once: if the answer is lost, it looks for the
-  submission instead of sending it again.
+  its tests, and sends the form only once: if the answer is lost, it looks for a
+  submission newer than the last one instead of sending it again. Without a terminal (CP
+  Editor), it never waits for an answer nobody can give.
 - **`cf stress`** finds `gen.*` and `brute.*` in the problem's folder.
 - **New commands**: `login`, `logout`, `langs`, `new`, `problems`, `status`, `open -s`,
   `open --last`. The 0.3 names (`parse`, `gen`, `watch`, `list`, `stand`, `sid`) still

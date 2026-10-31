@@ -144,7 +144,7 @@ language = "cpp"              # what cf get writes starter code in (asked on the
   - clang's bits/stdc++.h added with `-I` at build time, never written into the settings.
 - **Python**: when submitting as PyPy and pypy3 is installed, tests run with it.
 - **Submit language**: the configured `submit`; otherwise the newest fitting one of the
-  family from Codeforces' live list (cached for a day; the built-in table without it).
+  family from Codeforces' live list (the one read last; the built-in table before any).
 
 ### Build and run (build.py)
 
