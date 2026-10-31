@@ -9,6 +9,7 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       # NOTE: setup-uv has published no moving major tags (v10) since v8: pin a release
@@ -20,6 +21,7 @@ jobs:
   test:
     name: test (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15  # NOTE: a hung test fails fast instead of running for 6 hours
     # Windows support is experimental: its result is shown but does not fail the run
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:

@@ -8,6 +8,7 @@ comes as a batch: one POST per problem, each knowing the batch's size."""
 from __future__ import annotations
 
 import json
+import socketserver
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Callable
@@ -50,6 +51,14 @@ def save_problem(data: dict, cfg: Config, cwd: Path) -> tuple[Info, int]:
     return info, len(tests)
 
 
+class _Server(HTTPServer):
+    def server_bind(self) -> None:
+        # NOTE: HTTPServer's own also looks up this host's name, which can take
+        # \     half a minute on macOS; the name isn't needed here
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
@@ -74,7 +83,7 @@ def listen(
     ready(port) is called once listening."""
     code = templates.default_code(cfg, handle) if cfg.gen_after_parse else None
     try:
-        server = HTTPServer(("127.0.0.1", port), _Handler)
+        server = _Server(("127.0.0.1", port), _Handler)
     except OSError as e:
         raise CFError(
             f"Cannot listen on port {port} ({e.strerror or e}): try another with --port"

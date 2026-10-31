@@ -86,7 +86,10 @@ def test_the_server(tmp_path):
         ready.set()
 
     worker = threading.Thread(
-        target=listen.listen, args=(Config(), tmp_path, ""), kwargs={"port": 0, "ready": on_ready}
+        target=listen.listen,
+        args=(Config(), tmp_path, ""),
+        kwargs={"port": 0, "ready": on_ready},
+        daemon=True,  # NOTE: should the test fail, a waiting server mustn't keep pytest running
     )
     worker.start()
     assert ready.wait(10)
@@ -108,3 +111,17 @@ def test_a_taken_port(tmp_path):
         taken.listen()
         with pytest.raises(CFError, match="try another with --port"):
             listen.listen(Config(), tmp_path, "", port=taken.getsockname()[1])
+
+
+def test_the_server_starts_without_looking_up_the_host_name(monkeypatch):
+    import socket
+    import time
+
+    def slow(*args):
+        time.sleep(30)  # NOTE: what the lookup can cost on a Mac
+
+    monkeypatch.setattr(socket, "getfqdn", slow)
+    started = time.monotonic()
+    server = listen._Server(("127.0.0.1", 0), listen._Handler)
+    server.server_close()
+    assert time.monotonic() - started < 5

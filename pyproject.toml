@@ -76,6 +76,7 @@ markers = [
     "toolchain: tests that run this machine's compilers (opt-in: pytest -m toolchain)",
 ]
 addopts = "-m 'not live and not toolchain'"
+faulthandler_timeout = 60  # a test still running after a minute: print where every thread is
 
 [tool.mypy]
 python_version = "3.10"

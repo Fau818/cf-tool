@@ -11,6 +11,7 @@ on:
 jobs:
   live:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       # NOTE: setup-uv has published no moving major tags (v10) since v8: pin a release
