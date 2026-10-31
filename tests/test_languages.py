@@ -305,8 +305,9 @@ def test_java_commands(tmp_path):
     source = tmp_path / "a.java"
     source.write_text("import java.util.*;\npublic final class Main {}\n")
     s = setup("java", Settings(), source=source, offered=OFFERED, machine=jdk)
-    assert s.build == ("javac", "-encoding", "UTF-8", "-d", "{dir}", "{src}")
+    assert s.build == ("javac", "-encoding", "UTF-8", "-d", "{dir}", "{copy}")
     assert s.run == ("java", "-cp", "{dir}", "Main")
+    assert s.copy_as == "Main.java"  # NOTE: javac wants Main in Main.java, not a.java
     source.write_text("class Solution {}\n")  # NOTE: no public class to name
     s = setup("java", Settings(), source=source, offered=OFFERED, machine=jdk)
     assert (s.build, s.run) == (None, ("java", "{src}"))

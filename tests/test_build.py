@@ -56,6 +56,29 @@ def test_build_once_then_cached(tmp_path, cache):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["a.x", "cache", "log"]  # NOTE: no build
 
 
+def test_copy_is_the_code_in_the_build_folder_under_the_name_asked(tmp_path, cache):
+    # NOTE: like javac, a "compiler" that takes only a file of the right name
+    check = (
+        "import os, shutil, sys\n"
+        "assert os.path.basename(sys.argv[1]) == 'Main.x', sys.argv[1]\n"
+        "shutil.copy(sys.argv[1], sys.argv[2])\n"
+    )
+    source = tmp_path / "a.x"
+    source.write_text("print('copied')\n")
+    setup = Setup(
+        key="x",
+        name="X",
+        tool="fake",
+        build=(PY, "-c", check, "{copy}", "{dir}/prog.py"),
+        run=(PY, "{dir}/prog.py"),
+        copy_as="Main.x",
+    )
+    program = Program(source, setup)
+    assert not program.build().cached
+    assert program.run(timeout=30).stdout == b"copied\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.x", "cache"]  # NOTE: no copy here
+
+
 def test_a_change_builds_again(tmp_path, cache):
     source = tmp_path / "a.x"
     log = tmp_path / "log"

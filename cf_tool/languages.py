@@ -433,7 +433,7 @@ class Context:
 
 
 # (build command, or None when nothing is built; run command). Words may hold
-# the placeholders {src} {exe} {dir} {name} {class}, filled in by build.py.
+# the placeholders {src} {exe} {dir} {name} {class} {copy}, filled in by build.py.
 Commands = tuple["list[str] | None", "list[str]"]
 
 
@@ -523,19 +523,24 @@ def _python_commands(tool: Tool, ctx: Context) -> Commands:
 _JAVA_CLASS_RE = re.compile(r"\bpublic\s+(?:final\s+|abstract\s+)*class\s+(\w+)")
 
 
+def java_main_class(source: Path) -> str | None:
+    """The public class of a Java file; None when it has none (or is unreadable)."""
+    try:
+        match = _JAVA_CLASS_RE.search(source.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return None
+    return match.group(1) if match else None
+
+
 def _java_commands(tool: Tool, ctx: Context) -> Commands:
     """javac into the build folder, then java with the public class; without
     javac, or no public class to name, java runs the file itself."""
-    main_class = None
-    if ctx.source is not None:
-        try:
-            match = _JAVA_CLASS_RE.search(ctx.source.read_text(encoding="utf-8", errors="replace"))
-            main_class = match.group(1) if match else None
-        except OSError:
-            pass
+    main_class = java_main_class(ctx.source) if ctx.source is not None else None
     if tool.kind != "jdk" or (ctx.source is not None and main_class is None):
         return None, ["java", *ctx.flags, "{src}"]
-    build = ["javac", "-encoding", "UTF-8", *ctx.flags, "-d", "{dir}", "{src}"]
+    # NOTE: javac wants a public class in a file of its name (a.java holds Main):
+    # \     it compiles a copy named for the class (see Setup.copy_as)
+    build = ["javac", "-encoding", "UTF-8", *ctx.flags, "-d", "{dir}", "{copy}"]
     return build, ["java", "-cp", "{dir}", main_class or "{class}"]
 
 
@@ -891,6 +896,7 @@ class Setup:
     fingerprint: str = ""  # the tool's version text: part of the build cache key
     submit: tuple[str, str] | None = None  # the (id, name) it is submitted as, when known
     big_stack: bool = False  # run with Codeforces' stack
+    copy_as: str = ""  # the name {copy} gives the code in the build folder ("": its own)
 
 
 def setup(
@@ -952,6 +958,7 @@ def setup(
         build = build_words or None
     if run_words:
         run = run_words
+    main_class = java_main_class(source) if key == "java" and source is not None else None
     return Setup(
         key,
         language.name,
@@ -961,6 +968,7 @@ def setup(
         fingerprint=tool.banner or tool.program,
         submit=submit,
         big_stack=language.big_stack,
+        copy_as=f"{main_class}.java" if main_class else "",
     )
 
 

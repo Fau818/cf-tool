@@ -77,7 +77,8 @@ class Program:
         exe = self.source.stem + (".exe" if sys.platform == "win32" else "")
         values = {"src": str(self.source), "name": self.source.stem, "class": self.source.stem}
         if folder is not None:
-            values.update(dir=str(folder), exe=str(folder / exe))
+            copy = folder / (self.setup.copy_as or self.source.name)
+            values.update(dir=str(folder), exe=str(folder / exe), copy=str(copy))
         return values
 
     def build(self) -> Built:
@@ -101,7 +102,10 @@ class Program:
         work = folder.with_name(f"{folder.name}.{os.getpid()}.tmp")
         shutil.rmtree(work, ignore_errors=True)
         work.mkdir(parents=True)
-        argv = fill(self.setup.build, self._values(work))
+        values = self._values(work)
+        if any("{copy}" in word for word in self.setup.build):
+            shutil.copyfile(self.source, values["copy"])
+        argv = fill(self.setup.build, values)
         started = time.perf_counter()
         result = process.run(argv, cwd=self.source.parent, timeout=BUILD_TIMEOUT)
         seconds = time.perf_counter() - started
@@ -175,7 +179,8 @@ def _headers_stamp(build: tuple[str, ...], base: Path) -> str | None:
 
 def fill(words: tuple[str, ...] | list[str], values: dict[str, str]) -> list[str]:
     """The words of a command with its placeholders filled in: {src} {exe}
-    {dir} {name} {class}; one left unknown stays as written."""
+    {dir} {name} {class} {copy} (the code, copied into {dir} before the
+    build); one left unknown stays as written."""
     filled = []
     for word in words:
         for key, value in values.items():

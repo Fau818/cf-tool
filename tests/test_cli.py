@@ -452,7 +452,10 @@ def test_submit_as_cp_editor_calls_it(fake_submit):
     assert fake_submit["submitted"] == [(full_path, "546D", "70")]
     named_for_b = str(fake_submit["dir"] / "B.py")  # NOTE: both named: taken as meant
     result = run("submit", "546", "D", named_for_b)
-    assert result.exit_code == 0 and "submitting it to 546D as asked" in result.output
+    # NOTE: a long temporary path makes the line wrap
+    assert result.exit_code == 0 and "submitting it to 546D as asked" in " ".join(
+        result.output.split()
+    )
     assert fake_submit["menus"] == [] and fake_submit["questions"] == []
 
 
