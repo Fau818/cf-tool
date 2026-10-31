@@ -640,14 +640,94 @@ def gen(alias: str | None) -> None:
     templates.gen(cfg, client.handle, Path.cwd(), alias)
 
 
+def _test_args(ctx, param, incomplete: str) -> list[CompletionItem]:
+    """Tab completions for `cf test`: the samples here, then file names."""
+    try:
+        samples = judge.get_sample_ids(Path.cwd())
+    except OSError:
+        samples = []
+    return [*_words(incomplete, samples), CompletionItem(incomplete, type="file")]
+
+
+def _read_until_eof() -> str:
+    """Text typed (or piped) in until end of input."""
+    return sys.stdin.read()
+
+
+def _add_sample(cwd: Path) -> str:
+    """Type in a new sample, its input, then its answer (none: run it
+    without one); returns its id."""
+    end = "Ctrl-Z, then Enter" if sys.platform == "win32" else "Ctrl-D"
+    ui.cyan(f"Input of the new sample (end with {end} on an empty line):")
+    input_text = _read_until_eof()
+    if not input_text.strip():
+        raise CFError("No input: no sample added")
+    ui.cyan(f"Its answer (end with {end}; none: just run it):")
+    answer = _read_until_eof()
+    sample_id = judge.add_sample(cwd, input_text, answer)
+    saved = f"in{sample_id}.txt" + (f" and ans{sample_id}.txt" if answer.strip() else "")
+    ui.green(f"Added sample {sample_id}: {saved}")
+    return sample_id
+
+
 @main.command()
-@click.argument("file_arg", metavar="[FILE]", required=False, type=click.Path(dir_okay=False))
+@click.argument("args", nargs=-1, metavar="[FILE] [SAMPLE]...", shell_complete=_test_args)
+@click.option(
+    "-e", "--epsilon", type=float, help="Accept numbers within this absolute or relative error."
+)
+@click.option("-i", "--ignore-case", is_flag=True, help="Accept answers in any letter case.")
+@click.option(
+    "--checker",
+    metavar="CMD",
+    default="",
+    help="Judge with a program, run as: CMD input output answer (exit 0: right).",
+)
+@click.option("--exact", is_flag=True, help="Compare exactly, whatever the statement allows.")
+@click.option("--add", "add_one", is_flag=True, help="Type in a new sample, then test it.")
+@click.option(
+    "--accept", is_flag=True, help="Keep the output of samples without an answer as their answer."
+)
 @cf_command
-def test(file_arg: str | None) -> None:
-    """Compile and run the solution against all in{i}.txt/ans{i}.txt pairs."""
+def test(
+    args: tuple[str, ...],
+    epsilon: float | None,
+    ignore_case: bool,
+    checker: str,
+    exact: bool,
+    add_one: bool,
+    accept: bool,
+) -> None:
+    """Compile and run the solution on the samples (in{i}.txt, ans{i}.txt).
+
+    \b
+    cf test          every sample
+    cf test 2 3      samples 2 and 3
+    cf test a.cpp    with this code file
+    When cf parse found the statement accepts numbers within an error or any
+    letter case, so does cf test; options say otherwise.
+    """
+    files = [arg for arg in args if not arg.isdigit()]
+    if len(files) > 1:
+        raise CFError(f"One code file at a time, not {' and '.join(files)}")
+    samples = [arg for arg in args if arg.isdigit()]
     cfg = Config.load()
+    cwd = Path.cwd()
+    if add_one:
+        samples = [_add_sample(cwd)]
     info = _resolve((), cfg)  # the directory may say which problem this is
-    judge.run_test(cfg, file_arg, Path.cwd(), info.contest_id, info.problem_id)
+    judge.run_test(
+        cfg,
+        files[0] if files else None,
+        cwd,
+        info.contest_id,
+        info.problem_id,
+        samples=samples,
+        epsilon=epsilon,
+        ignore_case=ignore_case,
+        checker=checker,
+        exact=exact,
+        accept=accept,
+    )
 
 
 @main.command()

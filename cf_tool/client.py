@@ -69,6 +69,8 @@ class Client:
             time_limit=header.time_limit,
             memory_limit=header.memory_limit,
             interactive=header.interactive,
+            ignore_case=header.ignore_case,
+            epsilon=header.epsilon,
             cases=pages.find_sample_cases(body),
         )
         path.mkdir(parents=True, exist_ok=True)

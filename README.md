@@ -62,7 +62,7 @@ cf submit [-f file] [spec...]  submit code (picks the file, infers contest/probl
 cf list [spec...]              problems of a contest with stats
 cf parse [spec...]             download samples (in1.txt / ans1.txt)
 cf gen [alias]                 generate code from a template
-cf test [file]                 test against all in{i}.txt/ans{i}.txt pairs
+cf test [file] [sample...]     test against the samples (in{i}.txt / ans{i}.txt)
 cf watch [all] [spec...]       live table of your submissions
 cf open / stand / sid          open problem / standings / submission in a browser
 cf race [spec...]              countdown, then open + parse the contest
@@ -131,10 +131,22 @@ date/time. In scripts (`cf test`): `$%path%$`, `$%full%$` (a.cpp), `$%file%$` (a
 ### What `cf test` checks
 
 Each sample's output against its answer, line by line, with CPU time and memory.
-`cf parse` saves the problem's time and memory limits (in `.cf-problem.json`, next to
-the samples): a sample that runs a few times past the time limit is stopped, and runs
-over a limit are flagged. A program that crashes shows what it printed. Interactive
-problems are recognized and not judged.
+`cf parse` saves what the statement says (in `.cf-problem.json`, next to the samples):
+
+- **Limits**: a sample running a few times past the time limit is stopped; runs over
+  the time or memory limit are flagged.
+- **Tolerance**: when the statement accepts numbers within an error (`1e-6`) or answers
+  in any letter case, so does `cf test`. `-e 1e-9` and `-i` say so yourself, `--exact`
+  turns it off, and `--checker CMD` judges with your own program (`CMD input output
+  answer`, exit 0 when right, like a testlib checker).
+- **Multi-test samples**: a failure names the test case that differs and shows just
+  its input and lines.
+- **Interactive problems** are recognized and not judged.
+
+`cf test 2` runs sample 2 only. `cf test --add` asks for a new sample (input, then its
+answer) and tests it. A sample with no answer file is just run and its output shown;
+`--accept` keeps that output as its answer. A program that crashes shows what it
+printed.
 
 ## Files
 

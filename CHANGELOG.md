@@ -12,6 +12,11 @@
 - **`cf test`** stops a sample that runs a few times past the problem's time limit
   (saved by `cf parse`), flags runs over the time or memory limit, shows what a
   crashing program printed, and won't judge interactive problems.
+- **`cf test`** accepts what the statement accepts: numbers within its error, any
+  letter case (found by `cf parse`); `-e`, `-i`, `--exact` and `--checker CMD`
+  (testlib-style) override it. A failing multi-test sample names the test case that
+  differs. `cf test 2` runs one sample, `--add` types in a new one, samples without
+  an answer are run and shown, and `--accept` keeps their output.
 - **`cf submit`** names the language it submits as; when Codeforces no longer offers
   the template's language, it offers that family's current ones.
 - The built-in language table (used when not logged in) had wrong ids for G++23,

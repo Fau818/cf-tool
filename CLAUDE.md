@@ -74,7 +74,9 @@ cf_tool/
 ├── templates.py  # placeholder substitution, cf gen
 ├── judge.py      # cf test: before_script/script/after_script, in/ans pairs,
 │                 #   per-line-trim comparison, CPU time + peak RSS, Go's splitCmd;
-│                 #   kills a sample past timeout_for(the saved time limit)
+│                 #   kills a sample past timeout_for(the saved time limit); Check:
+│                 #   epsilon / any case (from the statement, see check_for) or a
+│                 #   testlib-style checker; samples without ans{i}.txt just run
 ├── langs.py      # static language-id fallback; language name -> file extension
 ├── ui.py         # markup-free console lines, spinner, questionary prompts with
 │                 #   a plain typed-input fallback for no-TTY

@@ -5,7 +5,14 @@ from cf_tool.problem import FILE_NAME, ProblemInfo
 
 def test_save_and_load(tmp_path):
     info = ProblemInfo(
-        "A. X", "https://codeforces.com/contest/1/problem/A", 2.5, 256, True, [None, ([0, 1], [1])]
+        name="A. X",
+        url="https://codeforces.com/contest/1/problem/A",
+        time_limit=2.5,
+        memory_limit=256,
+        interactive=True,
+        ignore_case=True,
+        epsilon=1e-6,
+        cases=[None, ([0, 1], [1])],
     )
     info.save(tmp_path)
     assert ProblemInfo.load(tmp_path) == info

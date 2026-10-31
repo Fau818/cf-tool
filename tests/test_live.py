@@ -116,3 +116,13 @@ def test_problem_header_and_cases():
     assert pages.find_problem_header(
         fetch("/problemset/problem/1520/F1", "problem-statement")
     ).interactive
+
+
+def test_statement_tolerance():
+    assert (
+        pages.find_problem_header(fetch("/problemset/problem/808/B", "problem-statement")).epsilon
+        == 1e-6
+    )
+    assert pages.find_problem_header(
+        fetch("/problemset/problem/2000/A", "problem-statement")
+    ).ignore_case

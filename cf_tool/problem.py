@@ -1,6 +1,6 @@
 """What `cf parse` learns about a problem besides its samples, kept in the
-problem's folder for `cf test`: its limits, whether it is interactive, and
-which test case each sample line belongs to."""
+problem's folder for `cf test`: its limits, whether it is interactive, how
+lenient its checker is, and which test case each sample line belongs to."""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ class ProblemInfo:
     time_limit: float | None = None  # seconds
     memory_limit: int | None = None  # megabytes
     interactive: bool = False
+    ignore_case: bool = False  # the statement accepts answers in any letter case
+    epsilon: float | None = None  # the absolute or relative error it accepts
     cases: list[Cases | None] = field(default_factory=list)  # one per in{i}/ans{i}
 
     def save(self, folder: Path) -> None:
@@ -37,6 +39,8 @@ class ProblemInfo:
                 time_limit=_number(data.get("time_limit")),
                 memory_limit=_number(data.get("memory_limit")),
                 interactive=bool(data.get("interactive", False)),
+                ignore_case=bool(data.get("ignore_case", False)),
+                epsilon=_number(data.get("epsilon")),
                 cases=[(list(c[0]), list(c[1])) if c else None for c in data.get("cases", [])],
             )
         except (OSError, ValueError, TypeError, IndexError, AttributeError):

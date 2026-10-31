@@ -144,25 +144,52 @@ _SAMPLE_LINE_RE = re.compile(
 )
 
 
+_ANY_CASE_RE = re.compile(
+    r"in any (?:letter )?case|any letter case|case[- ]insensitive|в любом регистре", re.IGNORECASE
+)
+_ERROR_RE = re.compile(
+    r"(?:(?:absolute|relative)\s+(?:or\s+(?:absolute|relative)\s+)?(?:error|precision)|погрешност)"
+    r"[^.]{0,160}?(?:10\s*(?:\^\s*\{?|\s)\s*[-−]\s*(\d+)|\b1\s*[eE]\s*[-−]\s*(\d+))",
+    re.IGNORECASE,
+)
+
+
 @dataclass
 class ProblemHeader:
     name: str  # "A. Watermelon"
     time_limit: float | None  # seconds
     memory_limit: int | None  # megabytes
     interactive: bool
+    ignore_case: bool = False  # the statement accepts answers in any letter case
+    epsilon: float | None = None  # the absolute or relative error it accepts
+
+
+def _statement_text(body: str) -> str:
+    """The statement's text before the samples, tags removed."""
+    start = body.find('class="problem-statement"')
+    if start < 0:
+        return ""
+    stop = body.find('class="sample-tests"', start)
+    statement = body[start : stop if stop >= 0 else len(body)]
+    return re.sub(r"\s+", " ", html_lib.unescape(_TAG_RE.sub(" ", statement)))
 
 
 def find_problem_header(body: str) -> ProblemHeader:
-    """A problem page's title, limits and whether it is interactive (a limit
-    the page doesn't show, as on acmsguru, is None)."""
+    """A problem page's title, limits, whether it is interactive, and how
+    lenient its checker is by the statement (a limit the page doesn't show,
+    as on acmsguru, is None)."""
     title = _TITLE_RE.search(body)
     time_limit = _TIME_LIMIT_RE.search(body)
     memory_limit = _MEMORY_LIMIT_RE.search(body)
+    statement = _statement_text(body)
+    error = _ERROR_RE.search(statement)
     return ProblemHeader(
         name=html_lib.unescape(_TAG_RE.sub("", title.group(1))).strip() if title else "",
         time_limit=float(time_limit.group(1)) if time_limit else None,
         memory_limit=int(memory_limit.group(1)) if memory_limit else None,
         interactive=bool(_INTERACTION_RE.search(body)),
+        ignore_case=bool(_ANY_CASE_RE.search(statement)),
+        epsilon=10.0 ** -int(error.group(1) or error.group(2)) if error else None,
     )
 
 

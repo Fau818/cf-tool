@@ -638,3 +638,46 @@ def test_replace_a_language_without_a_preset(tmp_path, answers):
     cfg, template = _template_config(tmp_path, alias="hs", lang="12", suffix=["hs"])
     with pytest.raises(CFError, match="doesn't offer Haskell GHC 8.10.1, nor anything like it"):
         cli._replace_language(cfg, template, "12", OFFERED)
+
+
+def _test_folder(isolated_home, tmp_path, monkeypatch) -> Path:
+    write_config(isolated_home, dict(PY_TEMPLATE, path=str(tmp_path / "tpl.py")))
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "a.py").write_text("print(int(input()) * 2)\n")
+    for i, (inp, ans) in enumerate([("1\n", "2\n"), ("2\n", "5\n")], start=1):
+        (work / f"in{i}.txt").write_text(inp)
+        (work / f"ans{i}.txt").write_text(ans)
+    monkeypatch.chdir(work)
+    return work
+
+
+def test_cf_test_picks_samples_by_number(isolated_home, tmp_path, monkeypatch):
+    _test_folder(isolated_home, tmp_path, monkeypatch)
+    result = CliRunner().invoke(main, ["test", "1"])
+    assert result.exit_code == 0, result.output
+    assert "Passed #1" in result.output and "#2" not in result.output
+    result = CliRunner().invoke(main, ["test", "a.py", "b.py"])
+    assert result.exit_code == 1 and "One code file at a time" in result.output
+
+
+def test_cf_test_add(isolated_home, tmp_path, monkeypatch):
+    import cf_tool.cli as cli_module
+
+    work = _test_folder(isolated_home, tmp_path, monkeypatch)
+    typed = iter(["21\n", "42\n"])
+    monkeypatch.setattr(cli_module, "_read_until_eof", lambda: next(typed))
+    result = CliRunner().invoke(main, ["test", "--add"])
+    assert result.exit_code == 0, result.output
+    assert "Added sample 3: in3.txt and ans3.txt" in result.output
+    assert "Passed #3" in result.output and "#1" not in result.output
+    assert (work / "ans3.txt").read_text() == "42\n"
+
+
+def test_cf_test_add_needs_an_input(isolated_home, tmp_path, monkeypatch):
+    import cf_tool.cli as cli_module
+
+    _test_folder(isolated_home, tmp_path, monkeypatch)
+    monkeypatch.setattr(cli_module, "_read_until_eof", lambda: "\n")
+    result = CliRunner().invoke(main, ["test", "--add"])
+    assert result.exit_code == 1 and "No input: no sample added" in result.output

@@ -392,3 +392,23 @@ def test_sample_cases_follow_the_trimmed_text():
     inputs, _ = find_samples(body)
     assert inputs == ["3\n4\n"]
     assert find_sample_cases(body) == [([1, 2], [1, 2])]
+
+
+def test_statement_tolerance():
+    from cf_tool.pages import find_problem_header
+
+    assert (
+        find_problem_header(fixture("epsilon_808b.html")).epsilon == 1e-6
+    )  # NOTE: 10<sup>-6</sup>
+    assert find_problem_header(fixture("anycase_2000a.html")).ignore_case
+    for name in ("problem_4a.html", "problem_2171a.html", "interactive_1520f1.html"):
+        header = find_problem_header(fixture(name))
+        assert (header.epsilon, header.ignore_case) == (None, False), name
+    modern = (
+        '<div class="problem-statement">Your answer is correct if its absolute or relative '
+        'error does not exceed $$$10^{-9}$$$.</div><div class="sample-tests">'
+    )
+    assert find_problem_header(modern).epsilon == 1e-9
+    # NOTE: wording after the samples (notes, the sidebar) doesn't count
+    later = '<div class="problem-statement"><div class="sample-tests">in any case</div></div>'
+    assert not find_problem_header(later).ignore_case
