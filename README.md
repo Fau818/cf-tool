@@ -41,8 +41,8 @@ is a newer version.
 ## Getting started
 
 1. **Get the problems.** `cf get 2050` makes a folder for each problem of contest 2050,
-   with its samples and your starter code. `cf get 2050b` gets one problem. The first
-   time, cf asks which language you write in.
+   with its statement, its samples and your starter code. `cf get 2050b` gets one
+   problem. The first time, cf asks which language you write in.
 2. **Test.** In a problem's folder, `cf test` builds your code and runs it on the
    samples. A build is kept, so an unchanged file isn't compiled again.
 3. **Submit.** `cf submit` sends your code and shows the verdict as it comes. The first
@@ -54,6 +54,7 @@ A contest looks like this on disk:
 2050/
   a/
     a.cpp              your code (any name; brute.cpp, gen.py and others can sit beside it)
+    statement.md       the statement, as Markdown (formulas in TeX)
     tests/1.in 1.ans   the samples, and any tests you add
     .cf-problem.json   what cf knows about the problem: its link, limits and checker rules
   b/
@@ -70,7 +71,7 @@ contest's folder, a problem's letter is enough: `cf test b`, `cf submit b`.
 | `cf get 2050` / `cf get 2050b` | folders, samples and starter code for a contest or a problem (a URL works too) |
 | `cf test [problem] [test...]` | build your code and run it on the problem's tests |
 | `cf submit [problem] [file]` | submit, then show the verdict as it comes |
-| `cf status` | your submissions to the contest, refreshed until they're judged |
+| `cf status` | your submissions to the contest, refreshed until they're judged; `cf status <id>`: one of them, with the test it failed |
 | `cf race 2050` | count down to the start, then open the problems and get them |
 | `cf open [problem]` | open the problem in the browser; `-s` the standings, `--last` your last submission |
 | `cf problems [contest]` | a contest's problems, and how many solved each |
@@ -90,13 +91,23 @@ contest's folder, a problem's letter is enough: `cf test b`, `cf submit b`.
 
 When several code files could be meant, `cf test` and `cf submit` show a menu: this
 problem's files first, the most recently edited first. A file named for another problem
-asks for a yes before it is submitted.
+asks for a yes before it is submitted. Helpers are never in the way: files whose names
+start with `gen`, `brute`, `check` or `interactor` (`gen2.py`, `brute_c.cpp`, `checker.cpp`).
+
+**After a failed test.** Once a contest is over, Codeforces shows your submission's failed
+test, and `cf submit` prints it under the verdict: what the checker said, the input, your
+output and the answer (the long ones cut short by Codeforces). A test shown in full is
+kept as `tests/cf-<n>`, so `cf test` runs it from then on. `cf status <submission id>`
+does the same for an earlier submission. When Python runs over a limit, cf suggests PyPy,
+which is usually several times faster on Codeforces.
 
 ## Testing
 
 `cf test` compares your output with each test's answer the way Codeforces' usual checker
 does: word by word, so spaces and line breaks don't matter. When the statement accepts
-numbers within an error (say 1e-6) or answers in any letter case, so does `cf test`.
+numbers within an error (say 1e-6) or answers in any letter case, so does `cf test`. When it
+accepts any right answer ("print any of them"), an output unlike the sample's is marked
+`?` (differs), not wrong: check it yourself, or let a checker decide.
 
 - `cf test 2` runs one test; `cf test 2 my` two of them.
 - Your own tests go in `tests/` as `<name>.in` with `<name>.ans`. `cf test --add` asks for
@@ -107,14 +118,16 @@ numbers within an error (say 1e-6) or answers in any letter case, so does `cf te
   memory limit is flagged.
 - `-e 1e-9` and `-i` accept an error or any letter case yourself, `--strict` compares
   trimmed lines, and `--exact` ignores what the statement allows.
-- A checker decides by itself: `checker.cpp` (any language) in the problem's folder, or
-  `--checker FILE`. It runs as `checker input output answer` and exits with 0 when the
+- A checker decides by itself: `checker.cpp` (any language, or `check_a.py` and the like)
+  in the problem's folder, or `--checker FILE` (or a command: `--checker "python3 chk.py"`). It runs as `checker input output answer` and exits with 0 when the
   output is right, like a testlib checker.
 
-**Stress testing.** Put a generator `gen.py` and a brute force `brute.cpp` (any languages)
-in the problem's folder and run `cf stress`. The generator prints one test for the seed it
-gets as its argument. The brute force's output is that test's answer. The first test your
-solution fails is saved as `tests/stress-<seed>`, so `cf test` keeps checking it.
+**Stress testing.** Put a generator `gen.py` and a brute force `brute.cpp` (any languages;
+`gen2.py` or `brute_c.cpp` do too) in the problem's folder and run `cf stress`. The
+generator prints one test for the seed it gets as its argument. The brute force's output is
+that test's answer. The first test your solution fails is saved as `tests/stress-<seed>`,
+so `cf test` keeps checking it. Each `cf stress` first checks those saved answers against
+the brute force as it is now, and says which it updated.
 
 **Interactive problems.** `cf test` runs your solution against an interactor:
 `interactor.cpp` (any language) in the problem's folder, or `--interactor FILE`. It runs as
@@ -171,9 +184,10 @@ uses.
 `cf login` asks for your handle (or email) and password; `cf submit` asks too when you
 aren't logged in. The password is saved encrypted, so an expired login renews itself.
 
-Logging in tries plain HTTP first. When Cloudflare checks the login page, a browser does it
-in the background, and only if Cloudflare wants a human to click does a browser window
-open. A wrong password stops right away.
+Codeforces lets only browsers through its login page, so cf logs in with Chrome in the
+background (a fresh one if the first gets stuck); only if a human has to click does a
+browser window open. A wrong password stops right away. Without a terminal, `cf login`
+reads the handle and the password from its input, one per line.
 
 The login lives in `~/.local/state/cf/session` (readable only by you); `cf logout`
 forgets it.
@@ -185,7 +199,9 @@ forgets it.
   where `cf get` puts them, and cf fetches no page.
 - **CP Editor.** [CP Editor](https://cpeditor.org) submits through cf-tool: in its
   preferences, set the CF Tool path to what `which cf` prints.
-- **Tab completion.** Commands, options, problem letters, test names and files:
+- **Tab completion.** Commands, options, the contests and problems around you (with their
+  names: `cf submit 2050 <Tab>` lists its problems), contests on now for `cf get`, test
+  names and code files:
 
   ```bash
   eval "$(cf completion zsh)"     # in ~/.zshrc, after compinit

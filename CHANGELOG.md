@@ -15,18 +15,34 @@ A new cf-tool: it no longer follows the Go cf-tool's model, and needs no setup.
   with Codeforces' 256 MB stack. Outputs are compared word by word, like Codeforces' usual
   checker; the statement's error and letter-case rules apply on their own.
 - **`cf get`** replaces `parse` and `gen`: one folder per problem (`2050/a/`) with its
-  tests in `tests/` and your starter code, and a whole contest in a single request.
-  A problem folder knows its problem (`.cf-problem.json`), so commands work anywhere
-  inside it, and `cf test b` works from the contest's folder.
+  statement (`statement.md`), its tests in `tests/` and your starter code, and a whole
+  contest in a single request. A problem folder knows its problem (`.cf-problem.json`), so
+  commands work anywhere inside it, and `cf test b` works from the contest's folder.
 - **`cf test`** keeps builds in a cache (an unchanged file isn't compiled again), and
   outside your folders; `-w` tests again on every save; interactive problems run against
   an interactor; `checker.*` in the problem's folder judges by itself. A time limit
-  stops everything the program started, and output past 64 MB stops it.
+  stops everything the program started, and output past 64 MB stops it. Where the
+  statement accepts any right answer, an output unlike the sample's is marked `?`, not
+  wrong.
 - **`cf submit`** logs in on the spot when needed, asks before sending code that failed
   its tests, and sends the form only once: if the answer is lost, it looks for a
   submission newer than the last one instead of sending it again. Without a terminal (CP
-  Editor), it never waits for an answer nobody can give.
-- **`cf stress`** finds `gen.*` and `brute.*` in the problem's folder.
+  Editor), it never waits for an answer nobody can give. Once a contest is over, a failed
+  test is shown as Codeforces keeps it (checker's words, input, output, answer) and, when
+  complete, saved as `tests/cf-<n>`; `cf status <submission id>` shows it for older ones.
+  Python over a limit hears of PyPy.
+- **`cf stress`** finds `gen*` and `brute*` in the problem's folder, and brings the
+  answers of the tests it saved before up to date with the brute force.
+- **Helpers stay out of the way**: files named `gen*`, `brute*`, `check*` or
+  `interactor*` are never taken for your code.
+- **Tab completion** offers the contests and problems around you with their names
+  (`cf submit 2050 <Tab>`), and for `cf get` the contests on now; code files, not every
+  file.
+- **Logging in** goes through a background browser (Codeforces lets only browsers through
+  its login page), a second one before ever opening a window; no browser is left running.
+  Without a terminal, `cf login` reads the handle and password from its input.
+- **Logs and AI agents**: without a terminal, output is 200 columns wide, so tables aren't
+  cut into pieces.
 - **A new look**: softer colors throughout, ✓ ! ✗ marks on messages, menus with their
   values lined up and the recommended choices marked; Esc backs out of any prompt.
 - **New commands**: `login`, `logout`, `langs`, `new`, `problems`, `status`, `open -s`,

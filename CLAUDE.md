@@ -43,7 +43,9 @@ cf_tool/
 │                   #   (submit status pull clone), account (login logout), setup
 │                   #   (config langs doctor upgrade), configure (cf config's menu:
 │                   #   the first choice of each list is the recommended one,
-│                   #   pre-selected), completion. Bodies stay thin;
+│                   #   pre-selected), completion (contests/problems from the folders
+│                   #   around and contests.json; code files, never every file or
+│                   #   number). Bodies stay thin;
 │                   #   common.py: cf_command (CFError -> a red line; CF_DEBUG=1 adds the
 │                   #   traceback), settings()/client() loaded once, finding the problem,
 │                   #   the first-run language question, logging in on the spot.
@@ -57,22 +59,25 @@ cf_tool/
 │                   #   code (render), Codeforces' language names (ext_of, LANGS)
 ├── workspace.py    # Target (contest/gym/group/acmsguru + URLs), parse_target,
 │                   #   problem folders (.cf-problem.json, here(), locate()), tests
-│                   #   (tests/<name>.in/.ans, 0.3's in<i>.txt), which code file
-│                   #   (find_code/pick_code: the menu), read_source
+│                   #   (tests/<name>.in/.ans, 0.3's in<i>.txt), statement.md, which
+│                   #   code file (find_code/pick_code: the menu; helper_kind), read_source
 ├── build.py        # Program: cached builds in $XDG_CACHE_HOME/cf/build/<key>/
 ├── process.py      # running programs: own process group, tree killed on timeout,
 │                   #   output cap, CPU time + peak memory from wait4; interact()
-├── judge.py        # comparison (words by default), verdicts, checker, interactor,
-│                   #   remembered results (cf submit warns), watch
+├── judge.py        # comparison (words by default), verdicts (? = differs where any
+│                   #   right answer goes), checker, interactor, remembered results
+│                   #   (cf submit warns), watch
 ├── stress.py  listen.py  doctor.py  views.py  ui.py  errors.py
 └── codeforces/     # everything that talks to Codeforces:
     ├── client.py   #   fetch (a contest's /problems page in one request), submit
-    │               #   (POST once), watch, pull, clone, API (2.1 s apart), languages
+    │               #   (POST once), watch, details (a failed test via POST
+    │               #   /data/submitSource, contest over), pull, clone, API (2.1 s
+    │               #   apart), languages
     ├── gateway.py  #   the way in: HTTP first, browser only on a challenge; tiered login
     ├── http.py     #   curl_cffi transport; 5xx/429 are errors (GET retried), one
     │               #   request at a time, cookies as full records
     ├── browser.py  #   DrissionPage: pass checks / log in through the real form
-    ├── pages.py    #   ALL HTML/JSON parsing (regex + bs4)
+    ├── pages.py    #   ALL HTML/JSON parsing (regex + bs4), statement_markdown
     ├── session.py  #   $XDG_STATE_HOME/cf/session (0600)
     └── crypto.py   #   the saved password's AES-GCM obfuscation
 ```
@@ -91,14 +96,19 @@ cf_tool/
   compiler banner and path; a C/C++ source with `#include "..."` is rebuilt every time.
 - **Processes**: every run in its own process group; on a timeout the whole tree dies and
   nothing waits on its pipes afterwards; Ctrl-C kills the child (it is outside the
-  terminal's group).
+  terminal's group). SIGTERM unwinds like Ctrl-C, and Chrome is killed after use even if
+  it ignores quit (`browser._close`): nothing cf started outlives it.
+- **Without a terminal the console is 200 columns wide** (`ui.WIDE`; COLUMNS wins), so
+  logs and AI agents get whole lines and tables.
 - **Problem identity lives in `.cf-problem.json`** (written by get, listen, pick --get);
   folder names are only a fallback (0.3's `cf/contest/2050/a`, `2050/a`, loose `2050A.cpp`).
 - **Submitting the wrong file costs penalty**: with several candidates the menu always
   asks (best guess pre-selected, newest first) — never auto-pick; a target read off a
   file name, or a file named for another problem, needs a confirmation
-  (`cli/submitting._submit_target`). Helpers (`gen.*`, `brute.*`, `checker.*`,
-  `interactor.*`) are never candidates unless named.
+  (`cli/submitting._submit_target`). Helpers (names starting with gen, generator, brute,
+  check, checker or interactor, then a digit, `_`, `-` or nothing: `workspace.helper_kind`)
+  are never candidates unless named; files a --checker/--interactor command runs aren't
+  either.
 - **A submission is POSTed once** (`http.post` never retries; `Uncertain` -> look on /my
   for a submission newer than the newest one before the POST; a challenge on the page a
   POST redirected to is `Uncertain` too).
