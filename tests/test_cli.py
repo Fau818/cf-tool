@@ -170,7 +170,7 @@ def test_get_a_contest(home):
     code = (folder / "a.py").read_text()
     assert "# A. Test" in code and f"# {HOST}/contest/2050/problem/A" in code
     assert (home["work"] / "2050" / "b" / "b.py").exists()
-    assert "→ cd 2050/a, then cf test and cf submit there" in result.output
+    assert f"→ cd {Path('2050/a')}, then cf test and cf submit there" in result.output
 
 
 def test_get_keeps_the_statement(home):

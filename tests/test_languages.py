@@ -451,7 +451,7 @@ def test_starter_sources(folders):
     assert starter("cpp", settings, "gen")[0] == "// mine\n"  # NOTE: no gen.cpp: the usual one
     own = folders / "t.cpp"
     own.write_text("// set\n", newline="\n")
-    configured = settings_with(f'[cpp]\ntemplate = "{own}"\n')
+    configured = settings_with(f"[cpp]\ntemplate = '{own}'\n")
     assert starter("cpp", configured) == ("// set\n", str(own))
     own.unlink()
     with pytest.raises(CFError, match="doesn't exist"):
@@ -486,7 +486,7 @@ def test_starter_builds_and_runs(key, tmp_path):
     if not tools:
         pytest.skip(f"no {language.name} toolchain here")
     for tool in tools:
-        settings = settings_with(f'[{key}]\ncompiler = "{tool.program}"\n')
+        settings = settings_with(f"[{key}]\ncompiler = '{tool.program}'\n")
         work = tmp_path / tool.program
         work.mkdir()
         source = work / f"a.{key}"

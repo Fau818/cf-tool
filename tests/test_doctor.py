@@ -49,7 +49,7 @@ def test_no_compiler():
 
 
 def test_a_missing_starter_file(tmp_path):
-    settings = settings_with(f'[cpp]\ntemplate = "{tmp_path / "gone.cpp"}"\n')
+    settings = settings_with(f"[cpp]\ntemplate = '{tmp_path / 'gone.cpp'}'\n")
     findings = doctor.check_language("cpp", settings, LIVE, True, GCC)
     assert [f.level for f in findings] == [ERROR] and "doesn't exist" in findings[0].text
 
