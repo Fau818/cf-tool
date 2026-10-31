@@ -109,7 +109,9 @@ class Settings:
         try:
             data = tomlkit.parse(text).unwrap()
         except TOMLKitError as e:
-            raise CFError(f"{path} isn't valid TOML: {e}") from e
+            # NOTE: the usual slip on Windows: in "C:\path" a backslash escapes
+            hint = " (write a Windows path as 'C:\\path' or C:/path)" if "\\" in text else ""
+            raise CFError(f"{path} isn't valid TOML: {e}{hint}") from e
         return _from_data(data, path)
 
     @property

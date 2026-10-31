@@ -444,13 +444,13 @@ def test_starter_sources(folders):
     assert origin == "built-in" and "bits/stdc++.h" in text
     templates = paths.templates_dir()
     templates.mkdir(parents=True)
-    (templates / "template.cpp").write_text("// mine\n")
-    (templates / "brute.cpp").write_text("// brute\n")
+    (templates / "template.cpp").write_text("// mine\n", newline="\n")
+    (templates / "brute.cpp").write_text("// brute\n", newline="\n")
     assert starter("cpp", settings) == ("// mine\n", str(templates / "template.cpp"))
     assert starter("cpp", settings, "brute")[0] == "// brute\n"
     assert starter("cpp", settings, "gen")[0] == "// mine\n"  # NOTE: no gen.cpp: the usual one
     own = folders / "t.cpp"
-    own.write_text("// set\n")
+    own.write_text("// set\n", newline="\n")
     configured = settings_with(f'[cpp]\ntemplate = "{own}"\n')
     assert starter("cpp", configured) == ("// set\n", str(own))
     own.unlink()

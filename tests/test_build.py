@@ -12,6 +12,13 @@ from cf_tool.build import BuildFailed, Program, fill
 from cf_tool.languages import Setup
 
 PY = sys.executable
+
+
+def lf(data: bytes) -> bytes:
+    """Output with Windows' line ends made \\n."""
+    return data.replace(b"\r\n", b"\n")
+
+
 # a "compiler" that logs each run, then copies the source to {dir}/prog.py
 COMPILE = (
     "import shutil, sys\n"
@@ -52,7 +59,7 @@ def test_build_once_then_cached(tmp_path, cache):
     assert not first.cached and builds(log) == 1
     program = Program(source, fake_setup(log))
     assert program.build().cached and builds(log) == 1
-    assert program.run(timeout=30).stdout == b"hi\n"
+    assert lf(program.run(timeout=30).stdout) == b"hi\n"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["a.x", "cache", "log"]  # NOTE: no build
 
 
@@ -75,7 +82,7 @@ def test_copy_is_the_code_in_the_build_folder_under_the_name_asked(tmp_path, cac
     )
     program = Program(source, setup)
     assert not program.build().cached
-    assert program.run(timeout=30).stdout == b"copied\n"
+    assert lf(program.run(timeout=30).stdout) == b"copied\n"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["a.x", "cache"]  # NOTE: no copy here
 
 
@@ -86,7 +93,7 @@ def test_a_change_builds_again(tmp_path, cache):
     Program(source, fake_setup(log)).build()
     source.write_text("print(2)\n")
     program = Program(source, fake_setup(log))
-    assert not program.build().cached and program.run(timeout=30).stdout == b"2\n"
+    assert not program.build().cached and lf(program.run(timeout=30).stdout) == b"2\n"
     Program(source, fake_setup(log, fingerprint="fake 2.0")).build()  # NOTE: a new compiler
     assert builds(log) == 3
 
@@ -115,7 +122,7 @@ def test_nothing_to_build(tmp_path, cache):
     program = Program(source, setup)
     assert program.build().cached
     assert program.argv() == [PY, str(source)]
-    assert program.run(timeout=30).stdout == b"py\n"
+    assert lf(program.run(timeout=30).stdout) == b"py\n"
 
 
 def test_old_builds_are_pruned(tmp_path, cache):
@@ -176,5 +183,5 @@ def test_a_build_finished_meanwhile_is_kept(tmp_path, cache, monkeypatch):
     monkeypatch.setattr(build.process, "run", run)
     program.build()
     monkeypatch.setattr(build.process, "run", real_run)
-    assert program.run(timeout=30).stdout == b"first\n"
+    assert lf(program.run(timeout=30).stdout) == b"first\n"
     assert [p.name for p in (cache / "build").iterdir()] == [program._folder.name]

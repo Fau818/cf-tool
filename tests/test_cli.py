@@ -91,6 +91,7 @@ def problem(contest: str, index: str, *samples: tuple[str, str]) -> FetchedProbl
 def home(tmp_path, monkeypatch):
     """An empty cf-tool: its folders in tmp_path, a fake client, cwd in work/."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(paths, "CONFIG_DIR", tmp_path / ".config" / "cf")
     monkeypatch.setattr(paths, "STATE_DIR", tmp_path / ".local" / "state" / "cf")
     monkeypatch.setattr(paths, "CACHE_DIR", tmp_path / ".cache" / "cf")
@@ -114,7 +115,7 @@ def settings_file(text: str) -> None:
 
 def python_language() -> None:
     """Python, run with this interpreter."""
-    settings_file(f'language = "py"\n[py]\nrun = "{sys.executable} {{src}}"\n')
+    settings_file(f"language = 'py'\n[py]\nrun = '{sys.executable} {{src}}'\n")
 
 
 def run(*args: str, input: str | None = None):
@@ -537,7 +538,7 @@ def test_off_a_terminal_nothing_is_asked(fake_submit):
     result = run("submit", "546D")
     assert result.exit_code == 1 and "Several code files could be meant" in result.output
     assert fake_submit["questions"] == [] and fake_submit["menus"] == []
-    settings_file(f'language = "py"\n[py]\nrun = "{sys.executable} {{src}}"\nsubmit = "99"\n')
+    settings_file(f"language = 'py'\n[py]\nrun = '{sys.executable} {{src}}'\nsubmit = '99'\n")
     result = run("submit", "546D", "546D.py")  # NOTE: 99 isn't offered: the family's best
     assert result.exit_code == 0, result.output
     assert "submitting as PyPy 3.10" in result.output
@@ -994,7 +995,7 @@ def test_race_waits_for_the_problems_to_show(home, monkeypatch):
 
 
 def test_a_language_no_longer_offered_is_picked_again(home, monkeypatch):
-    settings_file(f'language = "py"\n[py]\nrun = "{sys.executable} {{src}}"\nsubmit = "99"\n')
+    settings_file(f"language = 'py'\n[py]\nrun = '{sys.executable} {{src}}'\nsubmit = '99'\n")
     make_code(home["work"], "546D.py")
     menus = []
 

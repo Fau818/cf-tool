@@ -13,6 +13,13 @@ from cf_tool.errors import CFError
 from cf_tool.process import run, split_command
 
 PY = sys.executable
+
+
+def lf(data: bytes) -> bytes:
+    """Output with Windows' line ends made \\n."""
+    return data.replace(b"\r\n", b"\n")
+
+
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX process groups and signals")
 
 
@@ -34,25 +41,25 @@ def test_output_and_usage(tmp_path):
 def test_input_from_a_file(tmp_path):
     (tmp_path / "1.in").write_text("hello\n")
     argv = script(tmp_path, "print(input().upper())")
-    assert run(argv, cwd=tmp_path, stdin=tmp_path / "1.in", timeout=30).stdout == b"HELLO\n"
+    assert lf(run(argv, cwd=tmp_path, stdin=tmp_path / "1.in", timeout=30).stdout) == b"HELLO\n"
 
 
 def test_no_input_is_end_of_input(tmp_path):
     argv = script(tmp_path, "import sys; print(repr(sys.stdin.read()))")
-    assert run(argv, cwd=tmp_path, timeout=30).stdout == b"''\n"
+    assert lf(run(argv, cwd=tmp_path, timeout=30).stdout) == b"''\n"
 
 
 def test_unread_input_does_not_hang(tmp_path):
     argv = script(tmp_path, "print('done')")  # NOTE: never reads its 10 MB of input
     result = run(argv, cwd=tmp_path, stdin=b"x" * (10 * 1024 * 1024), timeout=30)
-    assert result.ok and result.stdout == b"done\n"
+    assert result.ok and lf(result.stdout) == b"done\n"
 
 
 def test_exit_code_and_stderr(tmp_path):
     argv = script(tmp_path, "import sys; print('partial'); sys.exit('boom')")
     result = run(argv, cwd=tmp_path, timeout=30)
     assert result.status == process.EXIT and result.reason() == "exit status 1"
-    assert result.stdout == b"partial\n" and b"boom" in result.stderr
+    assert lf(result.stdout) == b"partial\n" and b"boom" in result.stderr
 
 
 @posix_only
@@ -74,7 +81,7 @@ def test_timeout_kills_it(tmp_path):
     result = run(argv, cwd=tmp_path, timeout=1)
     assert time.monotonic() - started < 10
     assert result.status == process.TIMEOUT and result.reason() == "killed after 1s"
-    assert result.stdout == b"started\n"
+    assert lf(result.stdout) == b"started\n"
 
 
 @posix_only

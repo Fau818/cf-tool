@@ -200,6 +200,7 @@ def test_migrate_an_old_config(config_dir):
 
 def test_migrate_from_the_go_tool(config_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     go = {
         "template": [
             {
@@ -248,12 +249,14 @@ def test_a_linked_settings_file_stays_a_link(config_dir, tmp_path):
 
 def test_nothing_to_migrate(config_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert migrate() == []
     assert not (config_dir / "config.toml").exists()
 
 
 def test_a_broken_old_config(config_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     write(config_dir / "config", "{not json")
     assert "Could not read your old settings" in migrate()[0]
     assert not (config_dir / "config.toml").exists()
