@@ -17,6 +17,12 @@
   (testlib-style) override it. A failing multi-test sample names the test case that
   differs. `cf test 2` runs one sample, `--add` types in a new one, samples without
   an answer are run and shown, and `--accept` keeps their output.
+- **`cf stress GEN BRUTE`**: random tests until the solution and a brute force disagree;
+  the first failing test becomes a sample.
+- **`cf listen`** receives problems from the Competitive Companion browser extension:
+  samples without fetching a Codeforces page.
+- **`cf contests`** lists upcoming contests (`--ics` writes a calendar file); **`cf
+  pick`** picks a problem you haven't solved, by rating and tags.
 - **`cf submit`** names the language it submits as; when Codeforces no longer offers
   the template's language, it offers that family's current ones.
 - The built-in language table (used when not logged in) had wrong ids for G++23,

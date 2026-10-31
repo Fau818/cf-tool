@@ -51,7 +51,8 @@ cf_tool/
 ├── gateway.py    # the way in: HTTP first, browser only on a challenge, and the
 │                 #   tiered login; single-flight lock for threads
 ├── client.py     # Codeforces operations: parse, statis, race, submit, watch,
-│                 #   pull, clone, languages (all network via Gateway)
+│                 #   pull, clone, languages, contests, problemset (all network via
+│                 #   Gateway; API calls 2.1 s apart, lists cached in STATE_DIR)
 ├── http.py       # curl_cffi Transport (Chrome TLS impersonation), retry,
 │                 #   challenge detection, cookie jar as persistable dicts
 ├── browser.py    # DrissionPage: pass checks / log in through the real form
@@ -67,6 +68,10 @@ cf_tool/
 ├── problem.py    # .cf-problem.json in each problem folder: limits, interactive,
 │                 #   test case per sample line (written by parse, read by test)
 ├── doctor.py     # cf doctor's checks (read-only; no browser)
+├── stress.py     # cf stress: generator(seed) -> test, brute -> answer, compared
+│                 #   like cf test; the first failure becomes the next sample
+├── listen.py     # cf listen: Competitive Companion's POSTs on localhost:4244
+│                 #   (a port the extension sends to by default) -> samples + info
 ├── codefiles.py  # which code file: candidates by template suffix (+ the target's
 │                 #   folders 546/, 546/D/, 546D/ for submit, and the problem's files
 │                 #   around them when cwd is inside); the problem's files first,

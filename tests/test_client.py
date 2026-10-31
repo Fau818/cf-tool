@@ -110,3 +110,137 @@ def test_parse_warns_about_an_interactive_problem(client, tmp_path, monkeypatch,
     info = Info(problem_type="contest", contest_id="1520", problem_id="F1", root_path=tmp_path)
     client.parse(info)
     assert "Interactive: cf test can't judge it." in capsys.readouterr().out
+
+
+def test_contests_are_cached(client, tmp_path, monkeypatch):
+    import time
+
+    import cf_tool.config as config_module
+
+    monkeypatch.setattr(config_module, "STATE_DIR", tmp_path / "state")
+    now = time.time()
+    contests = [
+        {
+            "id": 3,
+            "name": "Later",
+            "phase": "BEFORE",
+            "startTimeSeconds": now + 7200,
+            "durationSeconds": 7200,
+        },
+        {
+            "id": 2,
+            "name": "Soon",
+            "phase": "BEFORE",
+            "startTimeSeconds": now + 60,
+            "durationSeconds": 7200,
+        },
+        {
+            "id": 1,
+            "name": "Old",
+            "phase": "FINISHED",
+            "startTimeSeconds": now - 9e5,
+            "durationSeconds": 7200,
+        },
+        {"id": 4, "name": "Started since caching", "phase": "BEFORE", "startTimeSeconds": now - 60},
+    ]
+    calls = []
+
+    def get_json(url):
+        calls.append(url)
+        return {"status": "OK", "result": contests}
+
+    client.gw.get_json = get_json
+    assert [c.name for c in client.contests()] == ["Soon", "Later"]
+    assert [c.name for c in client.contests()] == ["Soon", "Later"]
+    assert calls == ["https://codeforces.com/api/contest.list?gym=false"]  # NOTE: once
+
+
+def test_api_errors(client):
+    client.gw.get_json = lambda url: {"status": "FAILED", "comment": "Call limit exceeded"}
+    with pytest.raises(CFError, match="Codeforces API: Call limit exceeded"):
+        client.api("contest.list")
+
+
+def _problem(contest_id, index, rating, *tags):
+    from cf_tool.pages import ProblemsetProblem
+
+    return ProblemsetProblem(contest_id, index, f"Problem {contest_id}{index}", rating, tags)
+
+
+PROBLEMS = [
+    _problem(1, "A", 800, "math"),
+    _problem(2, "B", 1500, "dp", "greedy"),
+    _problem(3, "C", 1600, "dp", "interactive"),
+    _problem(4, "D", None, "dp"),
+    _problem(5, "E", 1500, "dp", "*special"),
+    _problem(6, "F", 1400, "dp"),
+]
+
+
+@pytest.mark.parametrize(
+    "solved,options,expected",
+    [
+        (set(), {}, {"1A", "2B", "3C", "4D", "6F"}),  # NOTE: never a joke (*special)
+        (set(), {"low": 1400, "high": 1600}, {"2B", "3C", "6F"}),  # NOTE: unrated out
+        (set(), {"low": 1500}, {"2B"}),
+        (set(), {"tags": ["dp", "!interactive"]}, {"2B", "4D", "6F"}),
+        ({(2, "B"), (6, "F")}, {"tags": ["dp"], "low": 1400, "high": 1600}, {"3C"}),
+        (set(), {"tags": ["*special"]}, {"5E"}),
+        ({(1, "A")}, {"tags": ["math"]}, set()),
+    ],
+)
+def test_pick_problem(solved, options, expected):
+    import random
+
+    from cf_tool.client import pick_problem
+
+    seen = set()
+    for seed in range(40):
+        problem, pool = pick_problem(PROBLEMS, solved, rng=random.Random(seed), **options)
+        assert pool == len(expected)
+        if problem is not None:
+            seen.add(problem.id)
+    assert seen == expected
+
+
+def test_api_calls_are_spaced(client, monkeypatch):
+    import cf_tool.client as client_module
+
+    clock = [100.0]
+    slept = []
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: slept.append(seconds))
+    client.gw.get_json = lambda url: {"status": "OK", "result": []}
+    client.api("a")
+    clock[0] += 0.5
+    client.api("b")
+    assert slept == [pytest.approx(1.6)]  # NOTE: 2.1 s apart
+
+
+def test_solved_and_problemset(client, tmp_path, monkeypatch):
+    import cf_tool.config as config_module
+
+    monkeypatch.setattr(config_module, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr("cf_tool.client.API_INTERVAL", 0)
+    answers = {
+        "problemset.problems": {
+            "problems": [
+                {
+                    "contestId": 4,
+                    "index": "A",
+                    "name": "Watermelon",
+                    "rating": 800,
+                    "tags": ["math"],
+                }
+            ]
+        },
+        "user.status?handle=me": [
+            {"verdict": "OK", "problem": {"contestId": 4, "index": "A"}},
+            {"verdict": "WRONG_ANSWER", "problem": {"contestId": 5, "index": "B"}},
+        ],
+    }
+    client.gw.get_json = lambda url: {"status": "OK", "result": answers[url.rsplit("/api/", 1)[1]]}
+    (problem,) = client.problemset()
+    assert (problem.id, problem.rating, problem.tags) == ("4A", 800, ("math",))
+    assert client.solved("me") == {(4, "A")}
+    assert (tmp_path / "state" / "problemset.json").is_file()  # NOTE: kept for a day

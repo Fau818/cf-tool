@@ -412,3 +412,19 @@ def test_statement_tolerance():
     # NOTE: wording after the samples (notes, the sidebar) doesn't count
     later = '<div class="problem-statement"><div class="sample-tests">in any case</div></div>'
     assert not find_problem_header(later).ignore_case
+
+
+def test_parse_contests():
+    from cf_tool.pages import Contest, parse_contests
+
+    result = [
+        {
+            "id": 2278,
+            "name": "Round",
+            "phase": "BEFORE",
+            "startTimeSeconds": 100,
+            "durationSeconds": 60,
+        },
+        {"id": 9, "name": "No start time yet", "phase": "BEFORE"},
+    ]
+    assert parse_contests(result) == [Contest(2278, "Round", 100, 60, "BEFORE")]

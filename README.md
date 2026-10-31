@@ -63,6 +63,10 @@ cf list [spec...]              problems of a contest with stats
 cf parse [spec...]             download samples (in1.txt / ans1.txt)
 cf gen [alias]                 generate code from a template
 cf test [file] [sample...]     test against the samples (in{i}.txt / ans{i}.txt)
+cf stress GEN BRUTE [file]     random tests until your solution and a brute force disagree
+cf listen                      receive problems from the Competitive Companion extension
+cf contests [--ics file]       upcoming contests (and a calendar file to import)
+cf pick [-r 1600] [-t dp]      a random problem you haven't solved, to practice on
 cf watch [all] [spec...]       live table of your submissions
 cf open / stand / sid          open problem / standings / submission in a browser
 cf race [spec...]              countdown, then open + parse the contest
@@ -77,6 +81,22 @@ A **specifier** is anything useful: `1136`, `1136a`, `a`, `gym 100001`, a full
 problem/contest/group URL, etc. Without one, the contest/problem is inferred from the
 current directory (layout `<root>/<contest|gym|group|acmsguru>/<contestID>/<problemID>/`,
 root folder name defaults to `cf`).
+
+### Stress testing
+
+`cf stress gen.py brute.cpp` runs random tests until your solution (the code file in
+the folder, or the one you name) and a brute force disagree. The generator gets the
+test's seed as its argument and prints one test; the brute force's output is the
+answer, compared the way `cf test` compares. The first failing test is saved as the
+next sample, so `cf test` keeps checking it. Any language with a template works for
+all three.
+
+### Without opening Codeforces: `cf listen`
+
+With the [Competitive Companion](https://github.com/jmerle/competitive-companion)
+extension in your browser, run `cf listen` and click its button on a problem or
+contest page: the samples and limits land where `cf parse` would put them, and cf
+fetches nothing, so Cloudflare can't get in the way.
 
 ### Tab completion
 

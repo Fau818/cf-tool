@@ -43,3 +43,36 @@ def test_without_cases_the_plain_diff():
 
 def test_no_output():
     assert "(no output)" in render(views.program_output(""))
+
+
+def test_contest_times():
+    assert views._until(35 * 60) == "35 min"
+    assert views._until(5 * 3600 + 12 * 60 + 30) == "5 h 12 min"
+    assert views._until(3 * 86400 + 4 * 3600) == "3 days 4 h"
+    assert views._until(-5) == "0 min"
+    assert views._length(2 * 3600 + 15 * 60) == "2:15"
+    assert views._length(14 * 86400) == "14 days"
+
+
+def test_calendar_file():
+    from cf_tool.pages import Contest
+
+    contests = [Contest(2278, "Round 1131 (Div. 3); rated, sure", 1793457300, 8100, "BEFORE")]
+    ics = views.to_ics(contests, "https://codeforces.com", now=1793400000)
+    lines = ics.split("\r\n")
+    assert lines[:3] == [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//cf-tool//Codeforces contests//EN",
+    ]
+    assert "DTSTART:20261031T143500Z" in lines and "DTEND:20261031T165000Z" in lines
+    assert r"SUMMARY:Round 1131 (Div. 3)\; rated\, sure" in lines  # NOTE: RFC 5545 escapes
+    assert lines[-2:] == ["END:VCALENDAR", ""] and "\n" not in ics.replace("\r\n", "")
+
+
+def test_calendar_lines_are_folded():
+    from cf_tool.pages import Contest
+
+    ics = views.to_ics([Contest(1, "x" * 200, 0, 60, "BEFORE")], "https://codeforces.com", 0)
+    assert all(len(line) <= 75 for line in ics.split("\r\n"))
+    assert ics.replace("\r\n ", "").count("x" * 200) == 1  # NOTE: unfolding restores it

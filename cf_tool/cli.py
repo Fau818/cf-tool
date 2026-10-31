@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import sys
+import time
 import traceback
 import webbrowser
 from pathlib import Path
@@ -24,11 +25,15 @@ import click
 from click.shell_completion import CompletionItem, get_completion_class
 
 from cf_tool import __version__, codefiles, judge, langs, presets, templates, ui, views
+from cf_tool import listen as listen_module
+from cf_tool import stress as stress_module
 from cf_tool import config as config_module
 from cf_tool.args import Info, parse_args
+from cf_tool import client as client_module
 from cf_tool.client import Client
 from cf_tool.config import PROBLEM_TYPES, CodeTemplate, Config
 from cf_tool.errors import CFError
+from cf_tool.problem import ProblemInfo
 
 REPOSITORY = "Fau818/cf-tool"
 
@@ -620,13 +625,10 @@ def parse(specifiers: tuple[str, ...]) -> None:
     """Download samples into <root>/<type>/<contest>/<problem>/."""
     cfg, client = _setup()
     info = _resolve(specifiers, cfg)
-    source, ext = "", ""
-    if cfg.gen_after_parse:
-        template_path = Path(cfg.default_template().path).expanduser()
-        ext = template_path.suffix
-        source = templates.substitute_code(codefiles.read_source(template_path), client.handle)
+    code = templates.default_code(cfg, client.handle) if cfg.gen_after_parse else None
     _, paths = client.parse(info)
-    if cfg.gen_after_parse:
+    if code is not None:
+        source, ext = code
         for path in paths:
             templates.generate_file(source, path, ext)
 
@@ -638,6 +640,33 @@ def gen(alias: str | None) -> None:
     """Generate a code file from a template into the current directory."""
     cfg, client = _setup()
     templates.gen(cfg, client.handle, Path.cwd(), alias)
+
+
+def _comparison_options(command):
+    """The options saying how output is compared with answers (cf test, cf stress)."""
+    options = [
+        click.option(
+            "-e",
+            "--epsilon",
+            type=float,
+            help="Accept numbers within this absolute or relative error.",
+        ),
+        click.option(
+            "-i", "--ignore-case", is_flag=True, help="Accept answers in any letter case."
+        ),
+        click.option(
+            "--checker",
+            metavar="CMD",
+            default="",
+            help="Judge with a program, run as: CMD input output answer (exit 0: right).",
+        ),
+        click.option(
+            "--exact", is_flag=True, help="Compare exactly, whatever the statement allows."
+        ),
+    ]
+    for option in reversed(options):
+        command = option(command)
+    return command
 
 
 def _test_args(ctx, param, incomplete: str) -> list[CompletionItem]:
@@ -672,17 +701,7 @@ def _add_sample(cwd: Path) -> str:
 
 @main.command()
 @click.argument("args", nargs=-1, metavar="[FILE] [SAMPLE]...", shell_complete=_test_args)
-@click.option(
-    "-e", "--epsilon", type=float, help="Accept numbers within this absolute or relative error."
-)
-@click.option("-i", "--ignore-case", is_flag=True, help="Accept answers in any letter case.")
-@click.option(
-    "--checker",
-    metavar="CMD",
-    default="",
-    help="Judge with a program, run as: CMD input output answer (exit 0: right).",
-)
-@click.option("--exact", is_flag=True, help="Compare exactly, whatever the statement allows.")
+@_comparison_options
 @click.option("--add", "add_one", is_flag=True, help="Type in a new sample, then test it.")
 @click.option(
     "--accept", is_flag=True, help="Keep the output of samples without an answer as their answer."
@@ -730,6 +749,66 @@ def test(
     )
 
 
+def _program(cfg: Config, filename: str | None, **pick) -> stress_module.Program:
+    """The code file named (or picked here) with the template that runs it."""
+    name, index = codefiles.pick(filename, cfg.template, Path.cwd(), **pick)
+    return stress_module.Program(name, cfg.template[index])
+
+
+@main.command()
+@click.argument("generator", type=click.Path(exists=True, dir_okay=False))
+@click.argument("brute", type=click.Path(exists=True, dir_okay=False))
+@click.argument("solution", required=False, type=click.Path(exists=True, dir_okay=False))
+@click.option("-n", "--tests", default=1000, show_default=True, help="Stop after this many tests.")
+@click.option("--seed", default=1, show_default=True, help="The first test's seed (then +1).")
+@_comparison_options
+@cf_command
+def stress(
+    generator: str,
+    brute: str,
+    solution: str | None,
+    tests: int,
+    seed: int,
+    epsilon: float | None,
+    ignore_case: bool,
+    checker: str,
+    exact: bool,
+) -> None:
+    """Random tests until SOLUTION and BRUTE disagree; that test becomes a sample.
+
+    GENERATOR prints one test for the seed it is given as its argument (any
+    language with a template). Without SOLUTION, the code file here is used.
+    """
+    cfg = Config.load()
+    if not cfg.template:
+        raise CFError(config_module.NO_TEMPLATE)
+    info = _resolve((), cfg)
+    programs = [
+        _program(cfg, generator),
+        _program(cfg, brute),
+        _program(
+            cfg,
+            solution,
+            contest=info.contest_id,
+            problem=info.problem_id,
+            action="stress test",
+            exclude=(generator, brute),
+        ),
+    ]
+    problem = ProblemInfo.load(Path.cwd())
+    check = judge.check_for(
+        problem, epsilon=epsilon, ignore_case=ignore_case, checker=checker, exact=exact
+    )
+    stress_module.stress(
+        Path.cwd(),
+        *programs,
+        tests=tests,
+        seed=seed,
+        check=check,
+        time_limit=problem.time_limit if problem else None,
+    )
+
+
 @main.command()
 @click.argument("specifiers", nargs=-1, shell_complete=_specifiers("all"))
 @cf_command
@@ -740,6 +819,125 @@ def watch(specifiers: tuple[str, ...]) -> None:
     cfg, client = _setup()
     info = _resolve(specifiers, cfg)
     client.watch(info, count=-1 if show_all else 10, problem_filter=info.problem_id)
+
+
+@main.command()
+@click.option(
+    "--ics",
+    "ics_path",
+    type=click.Path(dir_okay=False),
+    help="Also save them as a calendar file (.ics) to import.",
+)
+@cf_command
+def contests(ics_path: str | None) -> None:
+    """Upcoming contests, soonest first."""
+    _, client = _setup()
+    upcoming = client.contests()
+    if not upcoming:
+        ui.plain("No contest is scheduled right now.")
+        return
+    ui.console.print(views.contests_table(upcoming, time.time()))
+    if ics_path:
+        Path(ics_path).write_text(
+            views.to_ics(upcoming, client.host, time.time()), encoding="utf-8", newline=""
+        )
+        ui.green(f"Saved them to {ics_path}: import it into your calendar")
+
+
+# for Tab completion: the problemset's tags
+TAGS = (
+    "*special", "2-sat", "binary search", "bitmasks", "brute force", "chinese remainder theorem",
+    "combinatorics", "communication", "constructive algorithms", "data structures",
+    "dfs and similar", "divide and conquer", "dp", "dsu", "expression parsing", "fft", "flows",
+    "games", "geometry", "graph matchings", "graphs", "greedy", "hashing", "implementation",
+    "interactive", "math", "matrices", "meet-in-the-middle", "number theory", "probabilities",
+    "schedules", "shortest paths", "sortings", "string suffix structures", "strings",
+    "ternary search", "trees", "two pointers",
+)  # fmt: skip
+
+
+def _rating_range(ctx, param, value: str | None) -> tuple[int, int] | None:
+    """--rating 1600 or 1400-1800 as (low, high)."""
+    if value is None:
+        return None
+    match = re.fullmatch(r"(\d+)(?:-(\d+))?", value.strip())
+    if not match:
+        raise click.BadParameter("a rating like 1600, or a range like 1400-1800")
+    low, high = int(match.group(1)), int(match.group(2) or match.group(1))
+    return min(low, high), max(low, high)
+
+
+@main.command()
+@click.option(
+    "-r",
+    "--rating",
+    callback=_rating_range,
+    metavar="R|LOW-HIGH",
+    help="Its rating, e.g. 1600 or 1400-1800.",
+)
+@click.option(
+    "-t",
+    "--tag",
+    "tags",
+    multiple=True,
+    shell_complete=_offer(*TAGS, *(f"!{tag}" for tag in TAGS)),
+    help='A tag it has (repeatable); "!tag" for one it hasn\'t.',
+)
+@click.option("--handle", default="", help="Whose solved problems to skip (default: yours).")
+@click.option("--parse", "parse_it", is_flag=True, help="Parse its samples too.")
+@click.option("--open", "open_it", is_flag=True, help="Open it in the browser.")
+@cf_command
+def pick(
+    rating: tuple[int, int] | None,
+    tags: tuple[str, ...],
+    handle: str,
+    parse_it: bool,
+    open_it: bool,
+) -> None:
+    """A random problem you haven't solved, by rating and tags, to practice on."""
+    cfg, client = _setup()
+    handle = handle or client.handle
+    with ui.status("Reading the problemset..."):
+        problems = client.problemset()
+        solved = client.solved(handle) if handle else set()
+    if not handle:
+        ui.yellow("Not logged in: solved problems aren't skipped (or give --handle).")
+    low, high = rating or (None, None)
+    problem, pool = client_module.pick_problem(problems, solved, low=low, high=high, tags=tags)
+    if problem is None:
+        raise CFError("No problem you haven't solved matches that")
+    info = _resolve((problem.id,), cfg)
+    ui.line(
+        (problem.id, "bold green"),
+        (f"  {problem.name}", "bold"),
+        (f"  rating {problem.rating}" if problem.rating else "  unrated", "cyan"),
+    )
+    ui.line((", ".join(problem.tags) or "no tags", "dim"))
+    url = info.problem_url(cfg.host)
+    ui.plain(f"{url}  (one of {pool} to pick from)")
+    if open_it:
+        _open_url(url)
+    if parse_it:
+        client.parse(info)
+
+
+@main.command()
+@click.option(
+    "--port",
+    default=listen_module.DEFAULT_PORT,
+    show_default=True,
+    help="Port to listen on (one the extension sends to, or one added in its settings).",
+)
+@click.option("--keep", is_flag=True, help="Keep listening after a contest or problem arrived.")
+@cf_command
+def listen(port: int, keep: bool) -> None:
+    """Receive problems from the Competitive Companion browser extension.
+
+    Run it, then click the extension's button on a problem or contest page:
+    the samples land where cf parse would put them, and cf fetches no page.
+    """
+    cfg, client = _setup()
+    listen_module.listen(cfg, Path.cwd(), client.handle, port=port, keep=keep)
 
 
 @main.command("open")

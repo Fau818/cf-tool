@@ -89,6 +89,13 @@ def generate_file(source: str, current_path: Path, ext: str) -> Path:
     return save_path
 
 
+def default_code(cfg: Config, handle: str) -> tuple[str, str]:
+    """(code, extension) of the default template, placeholders filled in:
+    what "gen after parse" writes into each new problem folder."""
+    template_file = Path(cfg.default_template().path).expanduser()
+    return substitute_code(read_source(template_file), handle), template_file.suffix
+
+
 def gen(cfg: Config, handle: str, cwd: Path, alias: str | None = None) -> Path:
     """`cf gen [alias]`: instantiate a template into the current directory."""
     template_path = template_path_for_alias(cfg, alias) if alias else cfg.default_template().path

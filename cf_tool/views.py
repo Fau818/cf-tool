@@ -7,6 +7,7 @@ the caller's business. Every foreign string goes in as Text, never markup.
 from __future__ import annotations
 
 import operator
+from datetime import datetime, timezone
 from typing import Callable
 
 from rich import box
@@ -15,7 +16,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from cf_tool.pages import StatisInfo, Submission
+from cf_tool.pages import Contest, StatisInfo, Submission
 from cf_tool.problem import Cases
 
 LinesAlike = Callable[[str, str], bool]  # (output line, answer line): counts as it?
@@ -82,6 +83,84 @@ def problems_table(problems: list[StatisInfo]) -> Table:
     return table
 
 
+_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _when(moment: float) -> str:
+    """A moment in local time: "Sat Nov 1 14:35" (English names whatever the locale)."""
+    local = datetime.fromtimestamp(moment)
+    return f"{_DAYS[local.weekday()]} {_MONTHS[local.month - 1]} {local.day} {local:%H:%M}"
+
+
+def _until(seconds: float) -> str:
+    """A wait in words: "35 min", "5 h 12 min", "3 days 4 h"."""
+    minutes = max(0, int(seconds // 60))
+    days, minutes = divmod(minutes, 24 * 60)
+    hours, minutes = divmod(minutes, 60)
+    if days:
+        return f"{days} day{'s' if days > 1 else ''} {hours} h"
+    return f"{hours} h {minutes} min" if hours else f"{minutes} min"
+
+
+def _length(seconds: int) -> str:
+    """A contest's length: "2:15", or "14 days" for long ones."""
+    if seconds >= 24 * 3600:
+        days = round(seconds / (24 * 3600))
+        return f"{days} day{'s' if days > 1 else ''}"
+    return f"{seconds // 3600}:{seconds % 3600 // 60:02d}"
+
+
+def contests_table(contests: list[Contest], now: float) -> Table:
+    """Upcoming contests (`cf contests`), soonest first."""
+    table = Table(box=box.ROUNDED, border_style="dim", header_style="bold cyan")
+    for column in ("#", "contest", "starts", "in", "length"):
+        table.add_column(column, no_wrap=column != "contest")
+    for contest in contests:
+        table.add_row(
+            str(contest.id),
+            Text(contest.name),
+            _when(contest.start),
+            _until(contest.start - now),
+            _length(contest.duration),
+        )
+    return table
+
+
+def _ics_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+
+def _ics_fold(line: str) -> str:
+    """A content line folded to 75 characters, as calendars expect."""
+    parts = [line[:75]] + [" " + line[i : i + 74] for i in range(75, len(line), 74)]
+    return "\r\n".join(parts)
+
+
+def to_ics(contests: list[Contest], host: str, now: float) -> str:
+    """contests as an iCalendar file to import into a calendar app."""
+
+    def stamp(moment: float) -> str:
+        return datetime.fromtimestamp(moment, timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//cf-tool//Codeforces contests//EN"]
+    for contest in contests:
+        url = f"{host}/contests/{contest.id}"
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:contest-{contest.id}@codeforces.com",
+            f"DTSTAMP:{stamp(now)}",
+            f"DTSTART:{stamp(contest.start)}",
+            f"DTEND:{stamp(contest.start + contest.duration)}",
+            f"SUMMARY:{_ics_text(contest.name)}",
+            f"URL:{url}",
+            f"DESCRIPTION:{_ics_text(url)}",
+            "END:VEVENT",
+        ]
+    lines.append("END:VCALENDAR")
+    return "".join(_ics_fold(line) + "\r\n" for line in lines)
+
+
 def _clip(lines: list[str], limit: int) -> Text:
     text = Text("\n".join(lines[:limit]))
     if len(lines) > limit:
@@ -89,14 +168,13 @@ def _clip(lines: list[str], limit: int) -> Text:
     return text
 
 
-def program_output(text: str) -> Group:
-    """What a program printed, its first lines only."""
+def program_output(text: str, title: str = "Output") -> Group:
+    """Text a program printed (or got), under a -----title----- heading; its
+    first lines only."""
+    heading = Text(f"-----{title}-----", style="cyan")
     if not text.strip():
-        return Group(Text("-----Output-----", style="cyan"), Text("(no output)", style="dim"))
-    return Group(
-        Text("-----Output-----", style="cyan"),
-        _clip(text.rstrip("\n").split("\n"), INPUT_LINES),
-    )
+        return Group(heading, Text(f"(no {title.lower()})", style="dim"))
+    return Group(heading, _clip(text.rstrip("\n").split("\n"), INPUT_LINES))
 
 
 def _diff_rows(

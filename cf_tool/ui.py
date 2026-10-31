@@ -64,20 +64,21 @@ def line(*parts: tuple[str, str]) -> None:
 
 
 @contextlib.contextmanager
-def status(message: str) -> Iterator[None]:
-    """A spinner while something slow runs; a no-op off a terminal, or on an
-    older Rich that cannot nest it inside another live display."""
+def status(message: str) -> Iterator[Callable[[str], None]]:
+    """A spinner while something slow runs; yields a function that changes
+    its message. A no-op off a terminal, or on an older Rich that cannot nest
+    it inside another live display."""
     if not console.is_terminal:
-        yield
+        yield lambda text: None
         return
     spinner = console.status(Text(message, style="cyan"))
     try:
         spinner.start()
     except LiveError:
-        yield
+        yield lambda text: None
         return
     try:
-        yield
+        yield lambda text: spinner.update(Text(text, style="cyan"))
     finally:
         spinner.stop()
 

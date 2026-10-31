@@ -294,3 +294,9 @@ def test_read_source_encodings(tmp_path, capsys):
     assert "not UTF-8" in capsys.readouterr().out
     with pytest.raises(CFError, match="Cannot read"):
         read_source(tmp_path / "missing.cpp")
+
+
+def test_excluded_files_are_no_candidates(tmp_path, prompt):
+    make(tmp_path, "gen.py", "brute.cpp", "a.cpp")
+    name, _ = pick(None, TEMPLATES, tmp_path, exclude=("gen.py", "./brute.cpp"))
+    assert name == "a.cpp" and prompt.calls == []

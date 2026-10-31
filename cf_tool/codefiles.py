@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Collection
 
 from rich.cells import cell_len
 
@@ -139,10 +140,13 @@ def find(
     contest: str = "",
     problem: str = "",
     search_folders: bool = False,
+    exclude: Collection[str] = (),
 ) -> list[CodeFile]:
-    """Code files in cwd, ranked best first for the target problem. With
-    search_folders and a known contest, also those in its folders below cwd,
-    and when cwd is one of these folders, the problem's files around it."""
+    """Code files in cwd, ranked best first for the target problem, except
+    those in exclude. With search_folders and a known contest, also those in
+    its folders below cwd, and when cwd is one of these folders, the
+    problem's files around it."""
+    skip = {os.path.normpath(name) for name in exclude}
     suffixes = _suffix_map(templates)
     target = _Target(contest, problem)
     folders = [cwd]
@@ -165,6 +169,8 @@ def find(
             if folder in around and score != RELATED:
                 continue
             name = os.path.relpath(entry, cwd)  # ../../546D.cpp from 546/D/
+            if name in skip:
+                continue
             found[name] = CodeFile(
                 name, tuple(suffixes[entry.suffix]), score, entry.stat().st_mtime
             )
@@ -181,9 +187,11 @@ def pick(
     search_folders: bool = False,
     action: str = "submit",
     langs_table: dict[str, str] | None = None,
+    exclude: Collection[str] = (),
 ) -> tuple[str, int]:
     """Resolve to exactly one (file name, template index): the explicit file,
-    the only candidate, or the user's pick among the candidates."""
+    the only candidate, or the user's pick among the candidates (exclude:
+    files that aren't candidates)."""
     if filename:
         suffixes = _suffix_map(templates)
         ext = os.path.splitext(filename)[1]
@@ -194,7 +202,7 @@ def pick(
             )
         chosen = CodeFile(filename, tuple(suffixes[ext]))
     else:
-        files = find(templates, cwd, contest, problem, search_folders)
+        files = find(templates, cwd, contest, problem, search_folders, exclude)
         if not files:
             raise CFError(
                 "Cannot find any code.\nMaybe you should add a new template by `cf config`"

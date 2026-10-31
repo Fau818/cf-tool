@@ -681,3 +681,71 @@ def test_cf_test_add_needs_an_input(isolated_home, tmp_path, monkeypatch):
     monkeypatch.setattr(cli_module, "_read_until_eof", lambda: "\n")
     result = CliRunner().invoke(main, ["test", "--add"])
     assert result.exit_code == 1 and "No input: no sample added" in result.output
+
+
+def test_cf_stress_finds_the_solution_itself(isolated_home, tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    work.mkdir()
+    write_config(isolated_home, dict(PY_TEMPLATE, path=str(tmp_path / "tpl.py")))
+    (work / "gen.py").write_text("import sys\nprint(int(sys.argv[1]) % 10)\n")
+    (work / "brute.py").write_text("print(int(input()) * 2)\n")
+    (work / "sol.py").write_text("n = int(input())\nprint(n * 2 + (n == 3))\n")
+    monkeypatch.chdir(work)
+    result = CliRunner().invoke(main, ["stress", "gen.py", "brute.py", "-n", "10"])
+    assert result.exit_code == 0, result.output
+    assert "Wrong answer on the test from seed 3" in result.output
+    assert (work / "in1.txt").read_text() == "3\n"
+
+
+def test_cf_contests(isolated_home, tmp_path, monkeypatch):
+    import time
+
+    from cf_tool.client import Client
+    from cf_tool.pages import Contest
+
+    soon = Contest(2278, "Codeforces Round 1131 (Div. 3)", int(time.time()) + 3600, 8100, "BEFORE")
+    monkeypatch.setattr(Client, "contests", lambda self: [soon])
+    ics = tmp_path / "cf.ics"
+    result = CliRunner().invoke(main, ["contests", "--ics", str(ics)])
+    assert result.exit_code == 0, result.output
+    assert "Codeforces Round 1131" in result.output and "2:15" in result.output
+    assert "UID:contest-2278@codeforces.com" in ics.read_text()
+    monkeypatch.setattr(Client, "contests", lambda self: [])
+    assert "No contest is scheduled" in CliRunner().invoke(main, ["contests"]).output
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [("1600", (1600, 1600)), ("1400-1800", (1400, 1800)), ("1800-1400", (1400, 1800))],
+)
+def test_rating_range(value, expected):
+    from cf_tool.cli import _rating_range
+
+    assert _rating_range(None, None, value) == expected
+
+
+def test_rating_range_rejects_words():
+    import click
+
+    from cf_tool.cli import _rating_range
+
+    with pytest.raises(click.BadParameter):
+        _rating_range(None, None, "hard")
+
+
+def test_cf_pick(isolated_home, monkeypatch):
+    from cf_tool.client import Client
+    from cf_tool.pages import ProblemsetProblem
+
+    problems = [
+        ProblemsetProblem(4, "A", "Watermelon", 800, ("math", "brute force")),
+        ProblemsetProblem(1, "A", "Theatre Square", 1000, ("math",)),
+    ]
+    monkeypatch.setattr(Client, "problemset", lambda self: problems)
+    monkeypatch.setattr(Client, "solved", lambda self, handle: {(1, "A")})
+    result = CliRunner().invoke(main, ["pick", "-t", "math", "--handle", "me"])
+    assert result.exit_code == 0, result.output
+    assert "4A  Watermelon  rating 800" in result.output
+    assert "https://codeforces.com/contest/4/problem/A  (one of 1 to pick from)" in result.output
+    result = CliRunner().invoke(main, ["pick", "-r", "3000", "--handle", "me"])
+    assert result.exit_code == 1 and "No problem you haven't solved matches" in result.output

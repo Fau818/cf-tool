@@ -6,19 +6,22 @@ Cloudflare, login) is gateway.py's job, drawing is views.py's.
 from __future__ import annotations
 
 import dataclasses
+import json
 import math
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
-from typing import Callable
+from typing import Any, Callable, Sequence
 
 from rich.live import Live
 from rich.text import Text
 
 from cf_tool import langs, pages, ui, views
 from cf_tool.args import ERROR_NEED_PROBLEM_ID, Info
-from cf_tool.config import SESSION_PATH, Config
+from cf_tool import config as config_module
+from cf_tool.config import SESSION_PATH, Config, write_atomic
 from cf_tool.errors import CFError
 from cf_tool.gateway import Gateway, host_domain
 from cf_tool.problem import ProblemInfo
@@ -27,6 +30,9 @@ from cf_tool.session import INFO_KEYS, Session
 ERROR_SKIP = "Exists, skip"
 ERROR_TOO_MANY_REQUESTS = "Too many requests"
 PARSE_THREADS = 8
+CONTESTS_MAX_AGE = 1800  # seconds: the contest list rarely changes
+PROBLEMSET_MAX_AGE = 86400  # seconds: new problems come with new contests
+API_INTERVAL = 2.1  # seconds between API calls
 CLONE_THREADS = 16
 
 
@@ -36,6 +42,7 @@ class Client:
         self.session = Session.load(session_path or SESSION_PATH, host_domain(cfg.host))
         self.gw = Gateway(cfg, self.session)
         self._languages: tuple[dict[str, str], bool] | None = None
+        self._last_api = float("-inf")  # time.monotonic() of the last API call
 
     @property
     def host(self) -> str:
@@ -369,6 +376,47 @@ class Client:
         with ThreadPoolExecutor(max_workers=CLONE_THREADS) as pool:
             list(pool.map(worker, jobs))
 
+    # ------------------------------------------------------------ contests
+
+    def api(self, method: str):
+        """The result of a public API call ("contest.list?gym=false")."""
+        wait = self._last_api + API_INTERVAL - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)  # NOTE: the API allows one call every 2 seconds
+        try:
+            data = self.gw.get_json(f"{self.host}/api/{method}")
+        finally:
+            self._last_api = time.monotonic()
+        if data.get("status") != "OK":
+            raise CFError(f"Codeforces API: {data.get('comment') or 'the call failed'}")
+        return data["result"]
+
+    def contests(self) -> list[pages.Contest]:
+        """Contests that haven't started yet, soonest first."""
+        result = _cached(
+            config_module.STATE_DIR / "contests.json",
+            CONTESTS_MAX_AGE,
+            lambda: self.api("contest.list?gym=false"),
+        )
+        now = time.time()
+        upcoming = [
+            c for c in pages.parse_contests(result) if c.phase == "BEFORE" and c.start > now
+        ]
+        return sorted(upcoming, key=lambda c: c.start)
+
+    def problemset(self) -> list[pages.ProblemsetProblem]:
+        """Every problem of the problemset."""
+        result = _cached(
+            config_module.STATE_DIR / "problemset.json",
+            PROBLEMSET_MAX_AGE,
+            lambda: self.api("problemset.problems"),
+        )
+        return pages.parse_problemset(result)
+
+    def solved(self, handle: str) -> set[tuple[int, str]]:
+        """(contest id, index) of the problems handle has solved."""
+        return pages.parse_solved(self.api(f"user.status?handle={handle}"))
+
     # ------------------------------------------------------------ languages
 
     def languages(self) -> tuple[dict[str, str], bool]:
@@ -382,3 +430,44 @@ class Client:
                 live = {}
             self._languages = (live, True) if live else (langs.LANGS, False)
         return self._languages
+
+
+def _cached(path: Path, max_age: float, fetch: Callable[[], Any]) -> Any:
+    """fetch()'s result, kept in path and reused while it is younger than
+    max_age seconds (an unreadable copy is fetched again)."""
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        if 0 <= time.time() - saved["fetched"] < max_age:
+            return saved["result"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    result = fetch()
+    write_atomic(path, json.dumps({"fetched": time.time(), "result": result}))
+    return result
+
+
+def pick_problem(
+    problems: list[pages.ProblemsetProblem],
+    solved: set[tuple[int, str]],
+    *,
+    low: int | None = None,
+    high: int | None = None,
+    tags: Sequence[str] = (),
+    rng: random.Random | None = None,
+) -> tuple[pages.ProblemsetProblem | None, int]:
+    """A random problem to practice on, and how many there were to pick from.
+    It is:
+    - not solved yet, and not a joke (*special) unless that tag is asked for
+    - rated from low to high, when given (unrated problems are then out)
+    - tagged with every tag given, and with no tag given as "!tag" either"""
+    wanted = {tag for tag in tags if not tag.startswith("!")}
+    avoided = {tag[1:] for tag in tags if tag.startswith("!")} | ({"*special"} - wanted)
+    pool = [
+        p
+        for p in problems
+        if (p.contest_id, p.index) not in solved
+        and wanted <= set(p.tags)
+        and not avoided & set(p.tags)
+        and (low is None or (p.rating is not None and low <= p.rating <= (high or low)))
+    ]
+    return ((rng or random).choice(pool) if pool else None), len(pool)

@@ -463,3 +463,69 @@ def parse_submissions(body: str, count: int = -1) -> list[Submission]:
     if not submissions:
         raise CFError("Cannot find any submission")
     return submissions
+
+
+# ------------------------------------------------------------- contests (API)
+
+
+@dataclass(frozen=True)
+class Contest:
+    id: int
+    name: str
+    start: int  # seconds since the epoch
+    duration: int  # seconds
+    phase: str  # "BEFORE", "CODING", "FINISHED", ...
+
+
+def parse_contests(result: list) -> list[Contest]:
+    """The API's contest.list result as Contests (those without a start time left out)."""
+    return [
+        Contest(
+            int(c["id"]),
+            str(c.get("name", "")),
+            int(c["startTimeSeconds"]),
+            int(c.get("durationSeconds", 0)),
+            str(c.get("phase", "")),
+        )
+        for c in result
+        if isinstance(c, dict) and "id" in c and "startTimeSeconds" in c
+    ]
+
+
+@dataclass(frozen=True)
+class ProblemsetProblem:
+    contest_id: int
+    index: str  # "B", "F1"
+    name: str
+    rating: int | None  # None: not rated yet
+    tags: tuple[str, ...]
+
+    @property
+    def id(self) -> str:
+        return f"{self.contest_id}{self.index}"
+
+
+def parse_problemset(result: dict) -> list[ProblemsetProblem]:
+    """The API's problemset.problems result as problems."""
+    return [
+        ProblemsetProblem(
+            int(p["contestId"]),
+            str(p["index"]),
+            str(p.get("name", "")),
+            int(p["rating"]) if isinstance(p.get("rating"), (int, float)) else None,
+            tuple(str(tag) for tag in p.get("tags", [])),
+        )
+        for p in result.get("problems", [])
+        if isinstance(p, dict) and "contestId" in p and "index" in p
+    ]
+
+
+def parse_solved(result: list) -> set[tuple[int, str]]:
+    """(contest id, index) of every problem an API user.status result shows accepted."""
+    return {
+        (int(sub["problem"]["contestId"]), str(sub["problem"]["index"]))
+        for sub in result
+        if isinstance(sub, dict)
+        and sub.get("verdict") == "OK"
+        and "contestId" in sub.get("problem", {})
+    }
