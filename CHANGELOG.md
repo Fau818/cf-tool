@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 (2026-10)
 
 - **Language presets and a setup wizard**: `cf config` asks which language (C++,
   Python, Java, Kotlin, Rust, Go, C), finds the compiler, fills in the scripts and the

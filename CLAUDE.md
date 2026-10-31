@@ -13,7 +13,7 @@ check the Go originals first (reference copies in `.go_ref/`, gitignored).
 - Distribution name: `cf-tool`, package: `cf_tool`, CLI command: `cf`. Published on
   GitHub (Fau818/cf-tool), not PyPI — the PyPI name is unclaimed, so never tell users
   to `pip install cf-tool`. Install: `uv tool install git+https://github.com/Fau818/cf-tool`.
-- Versions are PEP 440 (`0.3.0a1`), tags `v<version>`; bump `pyproject.toml` and
+- Versions are PEP 440 (`0.3.1`, `0.4.0a1`), tags `v<version>`; bump `pyproject.toml` and
   `cf_tool/__init__.py` together and add a CHANGELOG.md entry. `cf upgrade` reads
   GitHub releases (pre-releases only for users already on one).
 - Supported Python: 3.10+ (CI runs 3.10–3.13 on Linux, 3.13 on macOS/Windows;

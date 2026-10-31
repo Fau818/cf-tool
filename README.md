@@ -8,7 +8,7 @@ A Codeforces command-line tool — a Python port of
 today's Cloudflare-protected Codeforces, logging in from the terminal.
 
 > [!WARNING]
-> **Early alpha: very early days.** This is cf-tool's first public alpha (`0.3.0a1`).
+> **Early alpha: very early days.** cf-tool is young.
 > Expect bugs (above all around Cloudflare and logging in), rough edges, and behavior
 > that may still change between releases. Try it on a practice problem before relying on
 > it in a rated contest, and please report what breaks in
