@@ -546,20 +546,20 @@ def test_a_statement_as_markdown():
     text = statement_markdown(fixture("problem_4a.html"))
     assert text.startswith("# A. Watermelon\n\ntime limit per test: 1 second · ")
     assert "\n## Input\n" in text and "\n## Output\n" in text and "\n## Note\n" in text
-    assert "Print `YES`, if the boys" in text  # NOTE: typewriter font
+    assert "Print YES, if the boys" in text  # NOTE: plain text, no inline formatting
     assert "### Input\n\n```\n8\n```" in text
-    assert "<" not in text.replace("<sub>", "").replace("<sup>", "")
+    assert "<" not in text
 
 
-def test_tex_lists_and_links_in_markdown():
+def test_tex_lists_and_images_in_markdown():
     from cf_tool.codeforces.pages import statement_markdown
 
     text = statement_markdown(fixture("problem_2171a.html"))
     assert "Shizuku counts $n$ legs" in text  # NOTE: $$$n$$$ on the page
-    assert "[It is known that](https://codeforces.com/contest/1996/problem/A)" in text
-    assert "- he can have two chickens and zero cows, or\n- he can have zero" in text
+    assert "It is known that only chickens" in text  # NOTE: a link's text
+    assert "- he can have two chickens and zero cows, or\n\n- he can have zero" in text
     old = statement_markdown(fixture("epsilon_808b.html"))
-    assert "2·10<sup>5</sup>" in old and "](https://espresso.codeforces.com/" in old
+    assert "2·10^5" in old and "a_i" in old and "](https://espresso.codeforces.com/" in old
     assert "### Input 3" in old  # NOTE: several examples are numbered
 
 
@@ -567,7 +567,7 @@ def test_an_interactive_statement_keeps_its_sections():
     from cf_tool.codeforces.pages import statement_markdown
 
     text = statement_markdown(fixture("interactive_1520f1.html"))
-    assert "**This is an interactive problem.**" in text and "\n## Interaction\n" in text
+    assert "This is an interactive problem." in text and "\n## Interaction\n" in text
     assert "? 4 6" in text
     assert statement_markdown("<html><p>no statement</p></html>") == ""
 
