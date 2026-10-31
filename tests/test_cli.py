@@ -191,6 +191,9 @@ def test_get_again_keeps_your_code(home):
     code.write_text("mine\n")
     assert run("get", "2050a").exit_code == 0
     assert code.read_text() == "mine\n"
+    settings_file('language = "cpp"\n')
+    assert run("get", "2050a").exit_code == 0
+    assert not code.with_suffix(".cpp").exists()  # NOTE: a.py is there: no second file
 
 
 def test_get_from_inside_a_contest_puts_the_next_one_beside_it(home, monkeypatch):
@@ -213,12 +216,13 @@ def test_the_first_get_asks_for_a_language(home, monkeypatch):
     monkeypatch.setattr(ui, "select", select)
     monkeypatch.setattr(ui, "interactive", lambda: True)
     home["client"].problems["4A"] = [problem("4", "A", ("8\n", "YES\n"))]
+    home["client"].problems["4B"] = [problem("4", "B", ("8\n", "YES\n"))]
     assert run("get", "4a").exit_code == 0
     assert asked and "Which language" in asked[0]
     assert (home["work"] / "4" / "a" / "a.py").exists()
     assert 'language = "py"' in paths.config_file().read_text()
-    assert run("get", "4a", "-l", "cpp").exit_code == 0  # NOTE: this once, no question
-    assert len(asked) == 1 and (home["work"] / "4" / "a" / "a.cpp").exists()
+    assert run("get", "4b", "-l", "cpp").exit_code == 0  # NOTE: this once, no question
+    assert len(asked) == 1 and (home["work"] / "4" / "b" / "b.cpp").exists()
 
 
 def test_off_a_terminal_the_first_get_writes_cpp(home):

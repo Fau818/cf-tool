@@ -194,16 +194,10 @@ def build(target: Program) -> None:
 
 def write_starter(folder: Path, target: Target, info: ProblemInfo | None, key: str) -> Path | None:
     """Write the starter code into a problem's folder as <problem>.<ext>,
-    unless the folder has code in that language already; returns the file
+    unless the folder has code already, in any language; returns the file
     written, if any."""
-    language = languages.LANGUAGES.get(key)
-    extensions = language.extensions if language else (key,)
-    has_code = any(
-        entry.suffix.lower().lstrip(".") in extensions and not workspace.is_helper(entry.name)
-        for entry in (folder.iterdir() if folder.is_dir() else [])
-    )
     path = folder / f"{target.problem.lower()}.{key}"
-    if has_code or path.exists():
+    if path.exists() or workspace.find_code(folder, settings()):
         return None
     text, _ = languages.starter(key, settings())
     path.parent.mkdir(parents=True, exist_ok=True)
