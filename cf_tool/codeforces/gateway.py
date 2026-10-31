@@ -192,10 +192,10 @@ class Gateway:
             except LoginRejected:
                 raise
             except CFError as e:
-                reason = str(e)
-                if isinstance(e, CloudflareChallengeError):
-                    reason = "Cloudflare guards the login page"
-                ui.yellow(f"HTTP login is not possible right now ({reason}); using a browser.")
+                # NOTE: a check in front of the login page is the usual reason, and
+                # \     the browser gets past it: no warning for that
+                if not isinstance(e, CloudflareChallengeError):
+                    ui.yellow(f"HTTP login is not possible right now ({e}); using a browser.")
                 handle = self._in_browser(
                     "Login", lambda headless: self._login_browser(password, headless)
                 )
@@ -212,7 +212,7 @@ class Gateway:
                 return  # another thread logged in while this one waited
             if self._login_error is not None:
                 raise self._login_error
-            ui.yellow("The saved login has expired; logging in again")
+            ui.cyan("The saved login has expired")
             try:
                 self.login()
             except CFError as e:
@@ -225,8 +225,8 @@ class Gateway:
         # \     cf_clearance /enter is challenged
         self.http.clear_cookies(keep=is_cloudflare_cookie)
         body = self.http.get(f"{self.host}/enter").text
-        if pages.has_turnstile(body):
-            raise CFError("the login form wants a Turnstile check")
+        if pages.has_turnstile(body) or pages.is_browser_check(body):
+            raise CloudflareChallengeError("the login page wants a browser check")
         csrf = pages.find_csrf(body)
         ftaa = _token(18)
         body = self.http.post(

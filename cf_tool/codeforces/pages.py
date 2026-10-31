@@ -54,6 +54,9 @@ _STANDARD_OUTPUT_RE = re.compile(
 _CLOUDFLARE_MARKERS = ("<title>Just a moment", "_cf_chl_opt")
 # Codeforces' own Turnstile gate posts the solved token here, then reloads
 _VERIFICATION_MARKER = "/data/turnstile"
+# Codeforces' own check in front of the login page: a script that sets a cookie
+# and reloads, so only a browser gets past it
+_BROWSER_CHECK_MARKER = "Your browser is being checked"
 _CAPTCHA_WORDS_RE = re.compile(r"captcha|robot|human|turnstile|verif", re.IGNORECASE)
 
 
@@ -74,6 +77,11 @@ def is_gate(body: str) -> bool:
 def has_turnstile(body: str) -> bool:
     """True when the page carries a Turnstile widget (only a browser can solve it)."""
     return "cf-turnstile" in body
+
+
+def is_browser_check(body: str) -> bool:
+    """True for Codeforces' "your browser is being checked" page."""
+    return _BROWSER_CHECK_MARKER in body
 
 
 def is_captcha_error(message: str) -> bool:

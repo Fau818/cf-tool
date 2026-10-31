@@ -159,6 +159,35 @@ def test_blocked_http_falls_back_to_headless(tmp_path, monkeypatch):
     assert [c["value"] for c in gw.session.cookies] == ["fresh"]
 
 
+@pytest.mark.parametrize(
+    "enter",
+    [CloudflareChallengeError, "<p>Please wait. Your browser is being checked. It may take...</p>"],
+)
+def test_a_checked_login_page_goes_to_the_browser_quietly(tmp_path, monkeypatch, enter):
+    transport = FakeTransport(gets={f"{HOST}/enter": enter, HOST: LOGGED_IN})
+    used = fake_browser(monkeypatch, login=lambda headless: browser_session())
+    warned = []
+    monkeypatch.setattr(gateway.ui, "yellow", warned.append)
+    gw = make_gateway(tmp_path, transport)
+
+    assert gw.login() == "tourist"
+    assert used == [("login", True)]
+    assert not any(call.startswith("POST") for call in transport.calls)
+    assert warned == []  # NOTE: the usual way in now, not a problem
+
+
+def test_an_unexpected_http_failure_is_shown(tmp_path, monkeypatch):
+    transport = FakeTransport(gets={f"{HOST}/enter": "<html></html>", HOST: LOGGED_IN})
+    used = fake_browser(monkeypatch, login=lambda headless: browser_session())
+    warned = []
+    monkeypatch.setattr(gateway.ui, "yellow", warned.append)
+    gw = make_gateway(tmp_path, transport)
+
+    assert gw.login() == "tourist"
+    assert used == [("login", True)]
+    assert warned == ["HTTP login is not possible right now (Cannot find csrf); using a browser."]
+
+
 def test_window_is_the_last_resort(tmp_path, monkeypatch):
     transport = FakeTransport(gets={f"{HOST}/enter": CloudflareChallengeError, HOST: LOGGED_IN})
 

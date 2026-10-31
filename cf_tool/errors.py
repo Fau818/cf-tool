@@ -13,12 +13,13 @@ class CFError(Exception):
 class NotLoggedInError(CFError):
     """Raised when Codeforces reports the session is not authenticated."""
 
-    def __init__(self, message: str = "Not logged in. Please run `cf config` to login") -> None:
+    def __init__(self, message: str = "Not logged in: run cf login") -> None:
         super().__init__(message)
 
 
 class CloudflareChallengeError(CFError):
-    """Raised when a response is a Cloudflare/Turnstile check instead of real content."""
+    """Raised when a response is a check page (Cloudflare's, or Codeforces' own)
+    instead of real content."""
 
     def __init__(self, message: str = "Blocked by a Cloudflare challenge") -> None:
         super().__init__(message)

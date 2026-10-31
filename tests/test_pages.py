@@ -15,6 +15,7 @@ from cf_tool.codeforces.pages import (
     find_message,
     find_samples,
     has_turnstile,
+    is_browser_check,
     is_captcha_error,
     is_cloudflare_challenge,
     is_gate,
@@ -280,6 +281,12 @@ def test_codeforces_turnstile_page_is_a_gate():
     assert has_turnstile(page)
 
 
+def test_codeforces_browser_check_on_the_login_page():
+    page = fixture("browser_check_enter.html")
+    assert is_browser_check(page)
+    assert not has_turnstile(page)
+
+
 @pytest.mark.parametrize(
     "name", ["problem_4a.html", "problem_2171a.html", "contest_2171.html", "submissions.html"]
 )
@@ -290,6 +297,7 @@ def test_normal_pages_are_not_gates(name):
     assert "challenge-platform" in page
     assert not is_gate(page)
     assert not has_turnstile(page)
+    assert not is_browser_check(page)
 
 
 def test_live_samples_br_markup():
