@@ -21,7 +21,7 @@ from cf_tool.cli.common import (
     target_of,
     write_starter,
 )
-from cf_tool.cli.completion import complete_problems
+from cf_tool.cli.completion import complete_languages, complete_problems
 from cf_tool.errors import CFError
 from cf_tool.workspace import Target
 
@@ -35,7 +35,8 @@ def set_up(target: Target, key: str) -> Path:
     starter code; returns the contest's folder."""
     found = client().fetch(target)
     if not found:
-        raise CFError(f"{target.label} has no problems to get")
+        wait = f"cf race {target.contest} waits for its start"
+        raise CFError(f"{target.label} has no problems to see yet: {wait}")
     root = workspace.get_root(Path.cwd(), settings().root_folder())
     folders = []
     for problem in found:
@@ -74,7 +75,14 @@ def set_up(target: Target, key: str) -> Path:
 
 @click.command()
 @click.argument("specs", nargs=-1, metavar="CONTEST|PROBLEM|URL", shell_complete=complete_problems)
-@click.option("-l", "--lang", "language", metavar="EXT", help="Starter code in this language.")
+@click.option(
+    "-l",
+    "--lang",
+    "language",
+    metavar="EXT",
+    shell_complete=complete_languages,
+    help="Starter code in this language.",
+)
 @cf_command
 def get(specs: tuple[str, ...], language: str | None) -> None:
     """Set up a contest or a problem: a folder for each problem, with its
@@ -93,7 +101,14 @@ def get(specs: tuple[str, ...], language: str | None) -> None:
 
 @click.command()
 @click.argument("specs", nargs=-1, metavar="CONTEST", shell_complete=complete_problems)
-@click.option("-l", "--lang", "language", metavar="EXT", help="Starter code in this language.")
+@click.option(
+    "-l",
+    "--lang",
+    "language",
+    metavar="EXT",
+    shell_complete=complete_languages,
+    help="Starter code in this language.",
+)
 @cf_command
 def race(specs: tuple[str, ...], language: str | None) -> None:
     """Count down to a contest's start, then open its problems and get them."""
@@ -115,7 +130,14 @@ def race(specs: tuple[str, ...], language: str | None) -> None:
 
 @click.command()
 @click.argument("name", required=False)
-@click.option("-l", "--lang", "language", metavar="EXT", help="The language, when NAME has none.")
+@click.option(
+    "-l",
+    "--lang",
+    "language",
+    metavar="EXT",
+    shell_complete=complete_languages,
+    help="The language, when NAME has none.",
+)
 @cf_command
 def new(name: str | None, language: str | None) -> None:
     """Write a code file from your starter code into this folder.
@@ -160,7 +182,14 @@ def new(name: str | None, language: str | None) -> None:
     help="The port (one the extension sends to, or one added in its settings).",
 )
 @click.option("--keep", is_flag=True, help="Keep listening after a contest or a problem arrived.")
-@click.option("-l", "--lang", "language", metavar="EXT", help="Starter code in this language.")
+@click.option(
+    "-l",
+    "--lang",
+    "language",
+    metavar="EXT",
+    shell_complete=complete_languages,
+    help="Starter code in this language.",
+)
 @cf_command
 def listen(port: int, keep: bool, language: str | None) -> None:
     """Receive problems from the Competitive Companion browser extension.
@@ -226,7 +255,14 @@ def _tags(ctx, param, incomplete: str):
 @click.option("--handle", default="", help="Whose solved problems to skip (default: yours).")
 @click.option("--get", "get_it", is_flag=True, help="Set it up, as cf get does.")
 @click.option("--open", "open_it", is_flag=True, help="Open it in the browser.")
-@click.option("-l", "--lang", "language", metavar="EXT", help="Starter code in this language.")
+@click.option(
+    "-l",
+    "--lang",
+    "language",
+    metavar="EXT",
+    shell_complete=complete_languages,
+    help="Starter code in this language.",
+)
 @cf_command
 def pick(
     rating: tuple[int, int] | None,

@@ -15,8 +15,8 @@
 
 tomlkit reads and writes it, so the user's comments and layout survive the
 changes cf-tool makes (the language picked on the first cf get). The JSON
-config of cf-tool 0.3 (the Go tool's schema) is turned into one on the first
-run, see migrate().
+config of cf-tool 0.3 (and of the Go cf-tool it began as) is turned into one
+on the first run, see migrate().
 """
 
 from __future__ import annotations

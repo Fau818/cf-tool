@@ -221,8 +221,8 @@ class Gateway:
 
     def _login_http(self, password: str) -> str:
         session = self.session
-        # a fresh login, like the Go tool's new cookie jar, but Cloudflare's
-        # cookies stay: without a valid cf_clearance /enter is challenged
+        # NOTE: a fresh login, but Cloudflare's cookies stay: without a valid
+        # \     cf_clearance /enter is challenged
         self.http.clear_cookies(keep=is_cloudflare_cookie)
         body = self.http.get(f"{self.host}/enter").text
         if pages.has_turnstile(body):

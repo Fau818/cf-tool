@@ -41,6 +41,17 @@ def _problems_here() -> list[str]:
         return []  # NOTE: a broken folder only costs the suggestions
 
 
+def complete_languages(ctx, param, incomplete: str) -> list[CompletionItem]:
+    """The languages cf-tool knows, by their extension (cpp, py, ...)."""
+    from cf_tool.settings import Settings
+
+    try:
+        extra = list(Settings.load().languages)
+    except (CFError, OSError):
+        extra = []
+    return words(incomplete, [*languages.LANGUAGES, *extra])
+
+
 def complete_problems(ctx, param, incomplete: str) -> list[CompletionItem]:
     return words(incomplete, _problems_here())
 

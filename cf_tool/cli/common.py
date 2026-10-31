@@ -141,13 +141,20 @@ def starter_language(asked: str | None = None) -> str:
         return key
     if current.language:
         return current.language
+    keys = [
+        *languages.LANGUAGES,
+        *(key for key in current.languages if key not in languages.LANGUAGES),
+    ]
     key = ui.select(
-        "Which language do you write in? (saved in config.toml; cf get -l changes it once)",
-        [(language.name, language.key) for language in languages.LANGUAGES.values()],
+        "Which language do you write in?",
+        [(languages.display_name(key), key) for key in keys],
         default="cpp",
     )
     current.update("language", key)
-    ui.green(f"Writing {languages.display_name(key)} from now on: {short(current.file)}")
+    ui.green(
+        f"Starter code in {languages.display_name(key)} from now on "
+        f"(the language in {short(current.file)}; -l picks another once)"
+    )
     return key
 
 

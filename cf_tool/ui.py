@@ -142,14 +142,17 @@ def _canceled(answer) -> None:
         sys.exit(1)
 
 
-def choose_index(max_len: int) -> int:
-    """Prompt until the user enters a valid index in [0, max_len)."""
-    cyan("Please choose one (index): ")
+def choose_index(count: int, default: int = 0) -> int:
+    """Ask until the user types a number from 1 to count (Enter: the
+    default); returns the index of the choice."""
+    cyan(f"Your choice (1-{count}, Enter for {default + 1}): ")
     while True:
         text_in = scanline().strip()
-        if text_in.isdigit() and 0 <= int(text_in) < max_len:
-            return int(text_in)
-        red("Invalid index! Please try again: ")
+        if not text_in:
+            return default
+        if text_in.isdigit() and 1 <= int(text_in) <= count:
+            return int(text_in) - 1
+        red(f"A number from 1 to {count}, please: ")
 
 
 def select(
@@ -172,11 +175,13 @@ def select(
         number = 0
         for c in choices:
             if isinstance(c, Heading):
-                plain(f"     {c.text}")  # in line with the labels
+                plain(f"     {c.text}")  # NOTE: in line with the labels
             else:
-                plain(f"{number:3}: {c[0]}")
                 number += 1
-        return options[choose_index(len(options))][1]
+                plain(f"{number:3}) {c[0]}")
+        values = [value for _, value in options]
+        first = values.index(default) if default in values else 0
+        return options[choose_index(len(options), first)][1]
 
     import questionary
     from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings

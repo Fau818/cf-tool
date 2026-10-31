@@ -82,7 +82,8 @@ def langs(show_all: bool) -> None:
                 style="" if setup.submit else "yellow",
             )
         except CFError as e:
-            tool = Text(str(e).split(". To get one: ")[-1], style="yellow")
+            hint = str(e).split(". To get one: ")
+            tool = Text(f"missing: {hint[-1]}" if len(hint) > 1 else str(e), style="yellow")
             submits = Text("")
         try:
             _, origin = languages.starter(key, current)

@@ -17,10 +17,18 @@ CHOICES = [("a.cpp", "a"), ("b.cpp", "b"), ui.Heading("── other files ──
 
 def test_fallback_numbers_only_the_choices(monkeypatch, capsys):
     monkeypatch.setattr(ui, "interactive", lambda: False)
-    monkeypatch.setattr(ui, "choose_index", lambda n: n - 1)  # the last of n
+    monkeypatch.setattr(ui, "choose_index", lambda n, default: n - 1)  # NOTE: the last of n
     assert ui.select("Which file?", CHOICES) == "c"
     lines = capsys.readouterr().out.splitlines()
-    assert lines[1:] == ["  0: a.cpp", "  1: b.cpp", "     ── other files ──", "  2: c.cpp"]
+    assert lines[1:] == ["  1) a.cpp", "  2) b.cpp", "     ── other files ──", "  3) c.cpp"]
+
+
+def test_fallback_enter_takes_the_default(monkeypatch):
+    monkeypatch.setattr(ui, "interactive", lambda: False)
+    answers = iter(["", "9", "2"])
+    monkeypatch.setattr("builtins.input", lambda: next(answers))
+    assert ui.select("Which file?", CHOICES, default="b") == "b"
+    assert ui.select("Which file?", CHOICES) == "b"  # NOTE: 9 is no choice, then 2
 
 
 DEFAULT = object()

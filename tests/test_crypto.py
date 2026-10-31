@@ -1,4 +1,4 @@
-"""Round-trip tests for the Go-compatible password obfuscation."""
+"""The saved password's obfuscation: round trips and the format earlier cf-tools wrote."""
 
 import pytest
 

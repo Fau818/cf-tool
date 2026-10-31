@@ -1,8 +1,9 @@
-"""Password obfuscation, byte-compatible with xalanq/cf-tool.
+"""Password obfuscation for the saved login (the scheme earlier cf-tools
+used, so their saved logins keep working).
 
 AES-128-GCM with key = MD5("glhf" + handle + "233"), hex(nonce + ciphertext).
 The key derives only from the handle, so this is obfuscation against casual
-file reads, not real security — same trade-off the Go tool documents.
+file reads, not real security; the session file's 0600 mode does the rest.
 """
 
 from __future__ import annotations
