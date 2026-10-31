@@ -335,6 +335,25 @@ def test_stress_with_named_programs(contest, monkeypatch):
     assert "All 5 tests passed" in result.output
 
 
+def test_a_checker_command_s_file_is_not_taken_for_the_code(contest, monkeypatch):
+    folder = contest["work"] / "2050" / "b"  # NOTE: b.py prints 5, never the answer
+    (folder / "checkA.py").write_text("import sys\nsys.exit(0)\n")
+    monkeypatch.chdir(folder)
+    result = run("test", "--checker", f"{sys.executable} checkA.py")  # NOTE: a full path first
+    assert result.exit_code == 0, result.output
+    assert f"Judging with {sys.executable} checkA.py" in " ".join(result.output.split())
+
+
+def test_helpers_are_known_by_the_start_of_their_names(contest, monkeypatch):
+    folder = contest["work"] / "2050" / "b"
+    (folder / "check_b.py").write_text("import sys\nsys.exit(0)\n")
+    (folder / "brute_b.py").write_text("print(4)\n")
+    monkeypatch.chdir(folder)
+    result = run("test")  # NOTE: b.py is the only code; check_b.py judges
+    assert result.exit_code == 0, result.output
+    assert "Judging with check_b.py" in result.output
+
+
 def test_stress_finds_its_helpers(contest, monkeypatch):
     folder = contest["work"] / "2050" / "a"
     (folder / "gen.py").write_text("import sys\nprint(int(sys.argv[1]) % 7)\n")
@@ -517,6 +536,15 @@ def test_submit_warns_about_code_that_failed(fake_submit, monkeypatch):
     result = run("submit", "546D")
     assert result.exit_code == 1 and "Not submitted" in result.output
     assert "This code failed the test 2 in cf test" in fake_submit["questions"][0][0]
+
+
+def test_login_reads_a_piped_password_quietly(home):
+    logins = []
+    home["client"].login = lambda who, password: logins.append((who, password))
+    result = run("login", input="Fau915\nsecret\n")
+    assert result.exit_code == 0, result.output
+    assert logins == [("Fau915", "secret")]
+    assert "echo" not in result.output and "secret" not in result.output
 
 
 def test_submit_without_a_login(fake_submit, home):

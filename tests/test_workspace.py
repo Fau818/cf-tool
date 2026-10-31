@@ -346,6 +346,27 @@ def test_the_contest_folder(tmp_path, prompt):
     ]
 
 
+@pytest.mark.parametrize(
+    "name,kind",
+    [
+        ("gen.py", "gen"),
+        ("gen2.py", "gen"),
+        ("generator.cpp", "gen"),
+        ("Brute_c.cpp", "brute"),
+        ("brute-force.py", "brute"),
+        ("checker.cpp", "checker"),
+        ("check_a.py", "checker"),
+        ("interactor.py", "interactor"),
+        ("general.cpp", None),
+        ("checkers.cpp", None),
+        ("checkA.py", None),
+        ("a.cpp", None),
+    ],
+)
+def test_helpers_by_their_names(name, kind):
+    assert workspace.helper_kind(name) == kind
+
+
 def test_a_problem_folder_with_helpers(tmp_path, prompt):
     folder = tmp_path / "2050" / "a"
     make(folder, "brute.cpp", "gen.py", "checker.cpp", "a.cpp")

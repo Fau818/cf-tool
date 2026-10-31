@@ -48,15 +48,28 @@ def _comparison_options(command):
     return command
 
 
-def helper(folder: Path, name: str) -> Path | None:
-    """The helper named name in folder (gen.py, brute.cpp): the newest when there are several."""
+def helper(folder: Path, kind: str) -> Path | None:
+    """The problem's helper of a kind (gen, brute, checker, interactor) in
+    folder: gen.py, gen2.py, check_a.py; the newest when there are several."""
     known = languages.code_extensions(settings())
     found = [
         entry
-        for entry in folder.glob(f"{name}.*")
-        if entry.suffix.lower() in known and entry.is_file()
+        for entry in folder.glob("*.*")
+        if entry.suffix.lower() in known
+        and workspace.helper_kind(entry.name) == kind
+        and entry.is_file()
     ]
     return max(found, key=lambda entry: entry.stat().st_mtime) if found else None
+
+
+def _named_files(*specs: str) -> list[str]:
+    """The files that FILE|CMD options name (python3 check_a.py -> check_a.py):
+    they are helpers, never the code to test."""
+    named = []
+    for spec in filter(None, specs):
+        words = [spec] if Path(spec).is_file() else process.split_command(spec)
+        named += [str(Path(word).resolve()) for word in words if Path(word).is_file()]
+    return named
 
 
 def _program_or_command(spec: str, folder: Path) -> Program:
@@ -67,7 +80,10 @@ def _program_or_command(spec: str, folder: Path) -> Program:
     words = process.split_command(spec)
     if not words:
         raise CFError(f"Nothing to run in {spec!r}")
-    return Program(folder / words[0], Setup("command", words[0], spec, None, tuple(words)))
+    # NOTE: it runs in the problem's folder (a program's own), even when the
+    # \     command starts with a path to elsewhere (/usr/bin/python3 check.py)
+    source = folder / Path(words[0]).name
+    return Program(source, Setup("command", words[0], spec, None, tuple(words)))
 
 
 def _checker(spec: str, folder: Path | None) -> Program | None:
@@ -197,7 +213,13 @@ def test(
         path = Path(file).resolve()
     else:
         name, key = workspace.pick_code(
-            None, folder, settings(), contest=target.contest, problem=target.problem, action="test"
+            None,
+            folder,
+            settings(),
+            contest=target.contest,
+            problem=target.problem,
+            action="test",
+            exclude=_named_files(checker, interactor),
         )
         path = (folder / name).resolve()
     solution = program(path, key)
@@ -290,7 +312,7 @@ def stress(
             contest=target.contest,
             problem=target.problem,
             action="stress test",
-            exclude=(str(gen_path), str(brute_path)),
+            exclude=(str(gen_path), str(brute_path), *_named_files(checker)),
         )
         solution_path = (folder / name).resolve()
     programs = [program(gen_path), program(brute_path), program(solution_path)]

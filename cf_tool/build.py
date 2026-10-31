@@ -59,6 +59,11 @@ class Program:
     def name(self) -> str:
         return self.source.name
 
+    @property
+    def label(self) -> str:
+        """How messages name it: its file, or a command as it was given."""
+        return self.setup.tool if self.setup.key == "command" else self.name
+
     def _key(self, code: bytes, headers: str) -> str:
         digest = hashlib.sha256()
         for part in (

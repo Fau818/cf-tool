@@ -239,8 +239,14 @@ def ask_login(c: "Client") -> None:
         validate=lambda s: bool(s.strip()) or "Your Codeforces handle or email",
         allow_empty=False,
     )
-    ui.dim("The password stays hidden as you type it.")
-    password = getpass.getpass("Password: ")
+    if sys.stdin.isatty():
+        ui.dim("The password stays hidden as you type it.")
+        password = getpass.getpass("Password: ")
+    else:
+        # NOTE: piped in (printf ... | cf login): nothing to hide, and getpass
+        # \     would only warn that it cannot hide it
+        ui.cyan("Password:")
+        password = ui.scanline()
     if not password:
         raise CFError("No password: not logged in")
     c.login(who, password)

@@ -584,9 +584,26 @@ def _subdirs(folder: Path) -> list[Path]:
     return [e for e in _entries(folder) if e.is_dir() and not e.name.startswith(".")]
 
 
+# a helper is named for its kind (check and generator count too), then a digit,
+# _ or - and anything, or nothing more: gen.py, gen2.py, brute_c.cpp, check_a.py
+_HELPER_RE = re.compile(
+    r"(generator|gen|brute|checker|check|interactor)(?:[\d_-].*)?", re.IGNORECASE
+)
+
+
+def helper_kind(name: str) -> str | None:
+    """Which of a problem's helpers a file is (one of HELPERS), or None for
+    other code: gen2.py -> gen, check_a.py -> checker, general.cpp -> None."""
+    match = _HELPER_RE.fullmatch(Path(name).stem)
+    if match is None:
+        return None
+    word = match.group(1).lower()
+    return {"generator": "gen", "check": "checker"}.get(word, word)
+
+
 def is_helper(name: str) -> bool:
-    """Whether a file is one of a problem's helpers (gen.py, brute.cpp, ...)."""
-    return Path(name).stem.lower() in HELPERS
+    """Whether a file is one of a problem's helpers (gen.py, brute_c.cpp, ...)."""
+    return helper_kind(name) is not None
 
 
 def find_code(
@@ -670,7 +687,11 @@ def _choose(files: list[CodeFile], action: str) -> CodeFile:
         return files[0]
     if not ui.interactive():  # NOTE: a menu nobody can answer would wait forever
         names = ", ".join(f.name for f in files[:4]) + (", ..." if len(files) > 4 else "")
-        raise CFError(f"Several code files could be meant ({names}): name the one to {action}")
+        raise CFError(
+            f"Several code files could be meant ({names}): name the one to {action}. "
+            "Files named gen*, brute*, check* or interactor* (gen2.py, brute_c.cpp) "
+            "are helpers, never in the way"
+        )
     width = max(cell_len(f.name) for f in files)
     now = time.time()
     choices: list[ui.Choice | ui.Heading] = []

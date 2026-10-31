@@ -60,7 +60,7 @@ class Check:
         """What this check accepts beyond the exact words of the answer; ""
         when nothing."""
         if self.checker is not None:
-            return f"Judging with {self.checker.name}"
+            return f"Judging with {self.checker.label}"
         allowed = []
         if self.strict:
             allowed.append("only the answer's exact lines")
