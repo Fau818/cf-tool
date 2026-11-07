@@ -129,15 +129,16 @@ uses.
 ## Logging in
 
 `cf login` asks for your handle (or email) and password; `cf submit` asks too when you
-aren't logged in. The password is saved encrypted, so an expired login renews itself.
+aren't logged in. cf keeps the password, so an expired login renews itself.
 
-Codeforces lets only browsers through its login page, so cf logs in with Chrome in the
-background (a fresh one if the first gets stuck); only if a human has to click does a
+Codeforces lets only browsers through its login page, so cf logs in with Chrome (or
+Chromium) in the background (a fresh one if the first gets stuck); only if a human has to click does a
 browser window open. A wrong password stops right away. Without a terminal, `cf login`
 reads the handle and the password from its input, one per line.
 
-The login lives in `~/.local/state/cf/session` (readable only by you); `cf logout`
-forgets it.
+The login and the password live in `~/.local/state/cf/session`, which only you can read.
+The password in it is scrambled, not truly encrypted: the file's permissions are what
+guard it. `cf logout` forgets both.
 
 ## With other tools
 

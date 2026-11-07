@@ -4,7 +4,7 @@ nothing. It checks, in this order:
 - each language that matters (the one for starter code, those set in
   config.toml): its compiler, its starter file, what it submits as
 - the login, over plain HTTP (no browser)
-- Chrome, needed when Cloudflare checks the login"""
+- Chrome, which logging in needs"""
 
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def check_chrome(find: Callable[[], "str | None"] = browser.find_chrome) -> Find
         return Finding(OK, f"Chrome: {where}")
     return Finding(
         WARN,
-        "Chrome not found: logging in fails when Cloudflare checks it",
+        "Chrome not found: logging in needs it",
         "install Google Chrome or Chromium",
     )
 

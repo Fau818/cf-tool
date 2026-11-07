@@ -11,8 +11,8 @@ from cf_tool.cli.common import ask_login, cf_command, client
 @click.command()
 @cf_command
 def login() -> None:
-    """Log in to Codeforces (the password is saved encrypted, so an expired
-    login renews itself)."""
+    """Log in to Codeforces (the password is kept in a file only you can read,
+    so an expired login renews itself)."""
     c = client()
     if c.handle:
         ui.plain(f"Logged in as {c.handle} now; logging in again.")

@@ -1,5 +1,5 @@
 """The login session ($XDG_STATE_HOME/cf/session, mode 0600): the handle, the
-credentials (the password encrypted, see crypto.py), the cookies with the
+credentials (the password scrambled, see crypto.py), the cookies with the
 User-Agent they were issued to, and the last submission (for cf open --last).
 """
 
@@ -22,7 +22,7 @@ class Session:
     path: Path
     handle: str = ""
     handle_or_email: str = ""
-    password: str = ""  # encrypted, see crypto.py
+    password: str = ""  # scrambled, see crypto.py
     ftaa: str = ""
     bfaa: str = ""
     user_agent: str = ""

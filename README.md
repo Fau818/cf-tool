@@ -14,10 +14,15 @@ watch the verdict. No setup first.
 uv tool install cf-tool-cli   # or: pipx install cf-tool-cli
 ```
 
-You need Python 3.10+, a compiler or interpreter for your language, and Google Chrome to
-log in (it works in the background).
+You need Python 3.10+, a compiler or interpreter for your language, and Google Chrome (or
+Chromium) to log in.
 
 ## A contest, start to finish
+
+**`cf login`** asks for your handle and password, once. Codeforces lets only browsers
+through its login page, so cf logs in with Chrome in the background; it keeps the password
+in a file only you can read and logs in again by itself when the login expires. Skip this
+and `cf submit` asks.
 
 **`cf get 2050`** makes a folder per problem: the statement, the samples and your starter
 code. The first time, cf asks which language you write in.

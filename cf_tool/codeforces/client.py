@@ -74,7 +74,7 @@ class Client:
     # └──────────────────────────────────────────────────────────┘
 
     def login(self, handle_or_email: str, password: str) -> str:
-        """Save the credentials (encrypted) and log in; returns the handle."""
+        """Save the credentials (password scrambled) and log in; returns the handle."""
         self._languages = None  # NOTE: once logged in, the live list can be read
         self.gw.set_credentials(handle_or_email, password)
         return self.gw.login()

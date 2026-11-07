@@ -180,7 +180,7 @@ class Gateway:
             return self.session.ftaa, self.session.bfaa
 
     def set_credentials(self, handle_or_email: str, password: str) -> None:
-        """Store the credentials (password encrypted) for later logins."""
+        """Store the credentials (password scrambled) for later logins."""
         with self._lock:
             self.session.handle_or_email = handle_or_email
             self.session.password = crypto.encrypt_password(handle_or_email, password)
